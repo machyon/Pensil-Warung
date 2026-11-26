@@ -3,10 +3,15 @@ mod common;
 use std::sync::Arc;
 
 use axum::http::StatusCode;
+use axum::response::IntoResponse;
 use backend::auth::perms::Permissions;
+use backend::catat::dto::Batch;
+use backend::catat::exec::execute;
+use backend::catat::plan::{Plan, ProductRef, Step};
 use backend::state::AppState;
 use backend::storage::Storage;
 use common::{TestApp, TestResponse};
+use http_body_util::BodyExt;
 use rust_decimal::Decimal;
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -441,4 +446,203 @@ async fn permissions_are_checked_before_any_db_work() {
     let res = catat(&app, &cashier, Uuid::new_v4(), "x", sale).await;
     assert_eq!(res.status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(res.json["error"]["code"], "lines_invalid");
+}
+
+async fn user_id(app: &TestApp, email: &str) -> Uuid {
+    app.client()
+        .await
+        .query_one("SELECT id FROM users WHERE email = $1", &[&email])
+        .await
+        .unwrap()
+        .get(0)
+}
+
+fn batch(uuid: Uuid) -> Batch {
+    Batch {
+        client_uuid: uuid,
+        raw_text: "x".to_owned(),
+        ops: Vec::new(),
+    }
+}
+
+fn sale(line_no: u32, product: i64, qty: i64, price: i64) -> Step {
+    Step::Sale {
+        line_no,
+        product: ProductRef::Existing(product),
+        quantity: Decimal::from(qty),
+        unit_price: price,
+        line_total: qty * price,
+    }
+}
+
+/// Runs a hand-built plan (so the planner's stock check is bypassed) and
+/// returns the executor's error as (status, line_no/code pairs).
+async fn run_plan(app: &TestApp, user: Uuid, steps: Vec<Step>) -> (StatusCode, Vec<(i64, String)>) {
+    let total = steps
+        .iter()
+        .map(|s| match s {
+            Step::Sale { line_total, .. } => *line_total,
+            _ => 0,
+        })
+        .sum();
+    let mut client = app.client().await;
+    let tx = client.transaction().await.unwrap();
+    let err = match execute(&*tx, user, &batch(Uuid::new_v4()), Plan { steps, total }).await {
+        Err(e) => e,
+        Ok(_) => panic!("the executor accepted an oversell"),
+    };
+    drop(tx); // rollback
+    let res = err.into_response();
+    let status = res.status();
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let json: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(json["error"]["code"], "lines_invalid");
+    let lines = json["error"]["details"]["lines"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|l| {
+            (
+                l["line_no"].as_i64().unwrap(),
+                l["code"].as_str().unwrap().to_owned(),
+            )
+        })
+        .collect();
+    (status, lines)
+}
+
+#[tokio::test]
+async fn executor_maps_a_stock_violation_to_the_failing_line() {
+    let app = TestApp::new().await;
+    let t = user(&app).await;
+    let uid = user_id(&app, "siti@example.com").await;
+    let nasi = product(&app, &t, "Nasi Goreng", 15000, 3).await;
+    let teh = product(&app, &t, "Es Teh Manis", 3000, 2).await;
+    let short = "stock_insufficient".to_owned();
+
+    // Line 1 is fine, line 2 oversells through a sale item.
+    let steps = vec![sale(1, teh, 1, 3000), sale(2, nasi, 5, 15000)];
+    let (status, lines) = run_plan(&app, uid, steps).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(lines, [(2, short.clone())]);
+
+    // Line 2 oversells through an adjustment.
+    let steps = vec![
+        sale(1, teh, 1, 3000),
+        Step::AdjustDown {
+            line_no: 2,
+            product: ProductRef::Existing(nasi),
+            quantity: Decimal::from(4),
+        },
+    ];
+    let (status, lines) = run_plan(&app, uid, steps).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(lines, [(2, short)]);
+
+    // Everything rolled back.
+    assert_eq!(stock(&app, nasi).await, 3);
+    assert_eq!(stock(&app, teh).await, 2);
+    assert_eq!(movements(&app, nasi).await.len(), 1);
+    assert_eq!(movements(&app, teh).await.len(), 1);
+    assert_eq!(count(&app, "transactions").await, 0);
+    assert_eq!(count(&app, "transaction_items").await, 0);
+}
+
+#[tokio::test]
+async fn executor_reports_a_lost_client_uuid_race_without_side_effects() {
+    let app = TestApp::new().await;
+    let t = user(&app).await;
+    let uid = user_id(&app, "siti@example.com").await;
+    let nasi = product(&app, &t, "Nasi Goreng", 15000, 5).await;
+    let uuid = Uuid::new_v4();
+    // The "winner" already stored its transaction; the loser skips the handler's pre-check.
+    app.client()
+        .await
+        .execute(
+            "INSERT INTO transactions (user_id, client_uuid, raw_text, total) VALUES ($1, $2, 'w', 0)",
+            &[&uid, &uuid],
+        )
+        .await
+        .unwrap();
+
+    let mut client = app.client().await;
+    let tx = client.transaction().await.unwrap();
+    let plan = Plan {
+        steps: vec![sale(1, nasi, 2, 15000)],
+        total: 30000,
+    };
+    let out = execute(&*tx, uid, &batch(uuid), plan).await;
+    assert!(matches!(out, Ok(None)), "expected the conflict outcome");
+    drop(tx);
+
+    assert_eq!(count(&app, "transactions").await, 1);
+    assert_eq!(count(&app, "transaction_items").await, 0);
+    assert_eq!(stock(&app, nasi).await, 5);
+    assert_eq!(movements(&app, nasi).await.len(), 1);
+}
+
+#[tokio::test]
+async fn concurrent_duplicates_store_one_transaction() {
+    // More connections than requests, so they really overlap.
+    let app = TestApp::with_config(|c| c.database_pool_max = 8).await;
+    let t = user(&app).await;
+    let nasi = product(&app, &t, "Nasi Goreng", 15000, 10).await;
+    let uuid = Uuid::new_v4();
+    let ops = json!([{"line_no": 1, "op": "sale", "product": "nasi goreng", "quantity": 2}]);
+
+    let results = futures_join(
+        (0..5)
+            .map(|_| catat(&app, &t, uuid, "nasi goreng 2", ops.clone()))
+            .collect(),
+    )
+    .await;
+
+    let created = results
+        .iter()
+        .filter(|r| r.status == StatusCode::CREATED)
+        .count();
+    let replayed = results
+        .iter()
+        .filter(|r| r.status == StatusCode::OK)
+        .count();
+    assert_eq!(
+        (created, replayed),
+        (1, 4),
+        "{:?}",
+        results.iter().map(|r| &r.text).collect::<Vec<_>>()
+    );
+    let id = &results[0].json["transaction"]["id"];
+    assert!(id.is_i64());
+    assert!(results.iter().all(|r| &r.json["transaction"]["id"] == id));
+    assert_eq!(count(&app, "transactions").await, 1);
+    assert_eq!(count(&app, "transaction_items").await, 1);
+    assert_eq!(stock(&app, nasi).await, 8);
+    assert_eq!(movements(&app, nasi).await.len(), 2);
+}
+
+/// Polls all futures on this task, so they overlap on the shared pool.
+async fn futures_join<F: std::future::Future>(fs: Vec<F>) -> Vec<F::Output> {
+    let mut set = Vec::new();
+    for f in fs {
+        set.push(Box::pin(f));
+    }
+    let mut out: Vec<Option<F::Output>> = set.iter().map(|_| None).collect();
+    std::future::poll_fn(|cx| {
+        let mut pending = false;
+        for (f, o) in set.iter_mut().zip(out.iter_mut()) {
+            if o.is_none() {
+                match f.as_mut().poll(cx) {
+                    std::task::Poll::Ready(v) => *o = Some(v),
+                    std::task::Poll::Pending => pending = true,
+                }
+            }
+        }
+        if pending {
+            std::task::Poll::Pending
+        } else {
+            std::task::Poll::Ready(())
+        }
+    })
+    .await;
+    out.into_iter().map(Option::unwrap).collect()
 }
