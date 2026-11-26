@@ -72,3 +72,31 @@ pub struct DayItems {
     /// Revenue of the whole day.
     pub total: i64,
 }
+
+#[derive(Serialize)]
+pub struct MonthItem {
+    pub product_id: Option<i64>,
+    pub name: String,
+    pub qty: i64,
+    /// Share of the month's `total_qty`, one decimal.
+    pub share_pct: f64,
+    pub revenue: i64,
+    /// Current stock; `null` once the product was deleted.
+    pub stock: Option<i64>,
+}
+
+#[derive(Serialize)]
+pub struct Unsold {
+    pub id: i64,
+    pub name: String,
+    pub stock: i64,
+}
+
+#[derive(Serialize)]
+pub struct MonthItems {
+    /// Whole-month figures, whatever `q` is.
+    pub total_qty: i64,
+    pub revenue: i64,
+    pub items: Vec<MonthItem>,
+    pub unsold: Vec<Unsold>,
+}

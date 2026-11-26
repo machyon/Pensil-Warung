@@ -13,11 +13,15 @@ use tokio_postgres::GenericClient;
 use uuid::Uuid;
 
 use crate::common::time::{
-    Month, format_month, month_days_bounds, next_month, previous_month, same_days_previous_month,
-    through_day, today_wib, wib_day_bounds,
+    Month, format_month, month_bounds, month_days_bounds, next_month, previous_month,
+    same_days_previous_month, through_day, today_wib, wib_day_bounds,
 };
 use crate::error::AppResult;
-use dto::{DayItem, DayItems, DaySales, MonthRevenue, MonthSummary, Previous, TopItem, WeekdayAvg};
+use crate::products::like_pattern;
+use dto::{
+    DayItem, DayItems, DaySales, MonthItem, MonthItems, MonthRevenue, MonthSummary, Previous,
+    TopItem, Unsold, WeekdayAvg,
+};
 
 const TREND_MONTHS: usize = 12;
 const TOP_ITEMS: i64 = 5;
@@ -241,6 +245,74 @@ pub async fn day_items(
     })
 }
 
+/// `part / whole` as a percentage to one decimal, in `Decimal` like `change_pct`.
+fn share_pct(part: i64, whole: i64) -> f64 {
+    if whole == 0 {
+        return 0.0;
+    }
+    (Decimal::from(part) * Decimal::from(100) / Decimal::from(whole))
+        .round_dp_with_strategy(1, MidpointAwayFromZero)
+        .to_f64()
+        .unwrap_or_default()
+}
+
+/// Screen 09. `total_qty`, `revenue` and the shares are for the whole month;
+/// `q` only narrows the `items` and `unsold` lists by name.
+pub async fn month_items(
+    client: &impl GenericClient,
+    user_id: Uuid,
+    month: Month,
+    q: Option<&str>,
+) -> AppResult<MonthItems> {
+    let bounds = month_bounds(month);
+    let pattern = like_pattern(q);
+    let all = sold_items(client, user_id, bounds, None, None).await?;
+    let total_qty: i64 = all.iter().map(|r| r.qty).sum();
+    let revenue: i64 = all.iter().map(|r| r.revenue).sum();
+    let shown = if pattern.is_some() {
+        sold_items(client, user_id, bounds, None, pattern.as_deref()).await?
+    } else {
+        all
+    };
+    let items = shown
+        .into_iter()
+        .map(|r| MonthItem {
+            product_id: r.product_id,
+            name: r.name,
+            qty: r.qty,
+            share_pct: share_pct(r.qty, total_qty),
+            revenue: r.revenue,
+            stock: r.stock,
+        })
+        .collect();
+    let unsold = client
+        .query(
+            "SELECT id, name, stock FROM products p
+              WHERE user_id = $1 AND ($4::text IS NULL OR name ILIKE $4)
+                AND NOT EXISTS (
+                    SELECT 1 FROM transaction_items i
+                      JOIN transactions t ON t.id = i.transaction_id
+                     WHERE i.product_id = p.id AND t.status = 'completed'
+                       AND t.occurred_at >= $2 AND t.occurred_at < $3)
+              ORDER BY lower(name), id",
+            &[&user_id, &bounds.0, &bounds.1, &pattern],
+        )
+        .await?
+        .iter()
+        .map(|r| Unsold {
+            id: r.get("id"),
+            name: r.get("name"),
+            stock: whole(r.get("stock")),
+        })
+        .collect();
+    Ok(MonthItems {
+        total_qty,
+        revenue,
+        items,
+        unsold,
+    })
+}
+
 /// Average revenue per weekday over every calendar day 1..=`days` of `month`,
 /// days without sales counting as 0. `None` below `MIN_SALES_DAYS` days with sales.
 async fn weekday_avg(
@@ -304,7 +376,7 @@ pub async fn summary(
 
 #[cfg(test)]
 mod tests {
-    use super::change_pct;
+    use super::{change_pct, share_pct};
 
     #[test]
     fn change_pct_rounds_to_one_decimal() {
@@ -313,5 +385,13 @@ mod tests {
         assert_eq!(change_pct(1, 3), Some(-66.7));
         assert_eq!(change_pct(100, 0), None);
         assert_eq!(change_pct(0, 0), None);
+    }
+
+    #[test]
+    fn share_pct_rounds_to_one_decimal() {
+        assert_eq!(share_pct(1, 3), 33.3);
+        assert_eq!(share_pct(2, 3), 66.7);
+        assert_eq!(share_pct(5, 5), 100.0);
+        assert_eq!(share_pct(0, 0), 0.0);
     }
 }

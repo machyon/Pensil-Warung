@@ -6,8 +6,8 @@ use axum::extract::State;
 use axum::routing::get;
 use serde::Deserialize;
 
-use super::dto::{DayItems, DaySales, MonthRevenue, MonthSummary};
-use super::{day_items, days, months, summary};
+use super::dto::{DayItems, DaySales, MonthItems, MonthRevenue, MonthSummary};
+use super::{day_items, days, month_items, months, summary};
 use crate::auth::extractor::AuthUser;
 use crate::auth::perms::Perm;
 use crate::common::extract::{ApiPath, ApiQuery};
@@ -21,6 +21,7 @@ pub fn routes() -> Router<AppState> {
         .route("/analytics/months", get(list_months))
         .route("/analytics/month", get(month_summary))
         .route("/analytics/month/days", get(month_days))
+        .route("/analytics/month/items", get(month_items_list))
         .route("/analytics/days/{date}/items", get(day_items_list))
 }
 
@@ -79,4 +80,23 @@ async fn day_items_list(
     let day = resolve_day(&date)?;
     let client = state.pool.get().await?;
     Ok(Json(day_items(&**client, user.id, day).await?))
+}
+
+#[derive(Deserialize)]
+struct ItemsQuery {
+    month: Option<String>,
+    q: Option<String>,
+}
+
+async fn month_items_list(
+    State(state): State<AppState>,
+    user: AuthUser,
+    ApiQuery(q): ApiQuery<ItemsQuery>,
+) -> Result<Json<MonthItems>, AppError> {
+    state.perms.require(&user, Perm::AnalyticsRead)?;
+    let month = resolve_month(q.month.as_deref())?;
+    let client = state.pool.get().await?;
+    Ok(Json(
+        month_items(&**client, user.id, month, q.q.as_deref()).await?,
+    ))
 }
