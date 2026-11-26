@@ -148,6 +148,7 @@ mod tests {
             config: Arc::new(config),
             perms: Arc::default(),
             google_keys: Arc::default(),
+            storage: None,
         }
     }
 

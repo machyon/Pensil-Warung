@@ -7,6 +7,7 @@ use tracing_subscriber::EnvFilter;
 use backend::auth::perms::Permissions;
 use backend::config::{AppEnv, Config};
 use backend::state::AppState;
+use backend::storage::{Storage, TigrisStorage};
 use backend::{db, routes};
 
 #[derive(Parser)]
@@ -93,11 +94,19 @@ async fn serve(config: Config) -> Result<(), AnyError> {
     let pool = db::create_pool(&config)?;
     let port = config.port;
     let perms = Arc::new(Permissions::load(&pool).await?);
+    let storage = config
+        .storage
+        .as_ref()
+        .map(|c| Arc::new(TigrisStorage::new(c)) as Arc<dyn Storage>);
+    if storage.is_none() {
+        tracing::warn!("Tigris is not configured: product photo routes return 503");
+    }
     let state = AppState {
         pool,
         config: Arc::new(config),
         perms,
         google_keys: Arc::default(),
+        storage,
     };
     let app = routes::router(state);
 

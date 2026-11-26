@@ -7,8 +7,8 @@ use deadpool_postgres::Pool;
 use crate::auth::google::GoogleKeys;
 use crate::auth::perms::Permissions;
 use crate::config::Config;
+use crate::storage::Storage;
 
-/// The storage handle is added by a later branch.
 #[derive(Clone)]
 pub struct AppState {
     pub pool: Pool,
@@ -17,4 +17,6 @@ pub struct AppState {
     pub perms: Arc<Permissions>,
     /// Cached Google signing keys for `POST /auth/google`.
     pub google_keys: Arc<GoogleKeys>,
+    /// Photo storage. `None` when Tigris is not configured.
+    pub storage: Option<Arc<dyn Storage>>,
 }
