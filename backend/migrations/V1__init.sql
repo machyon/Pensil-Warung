@@ -2,8 +2,9 @@
 -- Pensil Warung: PostgreSQL 18 schema (v1)
 -- Source: Hi-Fi page of the "Pensil Warung Onboarding" canvas.
 --
--- Requires PostgreSQL 18 or newer (uuidv7()). Apply once, to an empty
--- database, in a single transaction.
+-- Requires PostgreSQL 18 or newer (uuidv7()). Applied by refinery
+-- (`backend migrate`), which runs it once, in a single transaction, and
+-- records it in refinery_schema_history. Never edit it once applied.
 --
 -- Conventions
 --   * Money is whole rupiah, stored as bigint (never float).
@@ -209,7 +210,7 @@ CREATE TABLE products (
   name       text          NOT NULL,
   price      bigint        NOT NULL,                 -- rupiah, current price
   stock      numeric(12,3) NOT NULL DEFAULT 0,       -- derived from stock_movements
-  photo_url  text,                                   -- optional ("Foto boleh nanti")
+  photo_key  text,                                   -- Tigris object key; optional ("Foto boleh nanti")
   created_at timestamptz   NOT NULL DEFAULT now(),
   updated_at timestamptz   NOT NULL DEFAULT now(),
 
