@@ -10,12 +10,12 @@ use serde_json::json;
 use std::collections::HashSet;
 
 use super::dto::ProductResponse;
-use super::{NewProduct, ProductPatch, create, get as get_product, list, update};
+use super::{NewProduct, ProductPatch, create, delete, get as get_product, list, update};
 use crate::auth::extractor::AuthUser;
 use crate::auth::perms::Perm;
 use crate::common::extract::{ApiJson, ApiPath, ApiQuery};
 use crate::common::names::name_key;
-use crate::common::response::Created;
+use crate::common::response::{Created, NoContent};
 use crate::error::{AppError, ErrorCode};
 use crate::state::AppState;
 
@@ -23,7 +23,10 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/products", get(list_products).post(create_one))
         .route("/products/bulk", post(create_bulk))
-        .route("/products/{id}", get(get_one).patch(patch_one))
+        .route(
+            "/products/{id}",
+            get(get_one).patch(patch_one).delete(delete_one),
+        )
 }
 
 #[derive(Deserialize)]
@@ -91,6 +94,21 @@ async fn patch_one(
     Ok(Json(
         update(&mut **client, user.id, id, &patch).await?.into(),
     ))
+}
+
+/// Hard delete: movements go with it, sale items keep their snapshots.
+async fn delete_one(
+    State(state): State<AppState>,
+    user: AuthUser,
+    ApiPath(id): ApiPath<i64>,
+) -> Result<NoContent, AppError> {
+    state.perms.require(&user, Perm::ProductManage)?;
+    let client = state.pool.get().await?;
+    if !delete(&**client, user.id, id).await? {
+        return Err(AppError::not_found());
+    }
+    // TODO(branch 05): delete the product's photo object.
+    Ok(NoContent)
 }
 
 /// `stock` is an integer: a decimal such as 1.5 is rejected as `invalid_body`.
