@@ -18,13 +18,16 @@ struct Cli {
     command: Option<Command>,
 }
 
-// `promote` and `demote` are added by a later branch.
 #[derive(Subcommand)]
 enum Command {
     /// Run the HTTP server (default).
     Serve,
     /// Apply pending database migrations and exit.
     Migrate,
+    /// Make the user with this email a broadcaster.
+    Promote { email: String },
+    /// Make the user with this email a normal user again.
+    Demote { email: String },
 }
 
 #[tokio::main]
@@ -50,6 +53,8 @@ async fn main() -> ExitCode {
     let result = match cli.command.unwrap_or(Command::Serve) {
         Command::Serve => serve(config).await,
         Command::Migrate => migrate(&config).await,
+        Command::Promote { email } => set_role(&config, &email, 2).await,
+        Command::Demote { email } => set_role(&config, &email, 1).await,
     };
 
     match result {
@@ -87,6 +92,24 @@ async fn migrate(config: &Config) -> Result<(), AnyError> {
             "applied migration"
         );
     }
+    Ok(())
+}
+
+/// Sets the role (1 user, 2 broadcaster). `token_version` is bumped in the same
+/// UPDATE so the old JWT is rejected and the user logs in again with the new role.
+async fn set_role(config: &Config, email: &str, role_id: i32) -> Result<(), AnyError> {
+    let pool = db::create_pool(config)?;
+    let client = pool.get().await?;
+    let row = client
+        .query_opt(
+            "UPDATE users SET role_id = $2, token_version = token_version + 1
+              WHERE email = lower($1) RETURNING email",
+            &[&email.trim(), &role_id],
+        )
+        .await?
+        .ok_or("no user with that email")?;
+    let role = if role_id == 2 { "broadcaster" } else { "user" };
+    println!("{} is now a {role}", row.get::<_, String>(0));
     Ok(())
 }
 
