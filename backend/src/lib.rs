@@ -2,6 +2,7 @@
 //! integration tests in `tests/` share the same modules.
 
 pub mod account;
+pub mod analytics;
 pub mod auth;
 pub mod catat;
 pub mod common;
