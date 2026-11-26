@@ -65,6 +65,7 @@ mod tests {
         let state = AppState {
             pool,
             config: Arc::new(config),
+            perms: Arc::default(),
         };
         Router::new()
             .route(

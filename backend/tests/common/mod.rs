@@ -14,6 +14,7 @@ use std::sync::Arc;
 use axum::Router;
 use axum::body::Body;
 use axum::http::{HeaderMap, Method, Request, StatusCode, header};
+use backend::auth::perms::Permissions;
 use backend::config::Config;
 use backend::db;
 use backend::routes;
@@ -80,11 +81,13 @@ impl TestApp {
         let state = AppState {
             pool: pool.clone(),
             config: config.clone(),
+            perms: Arc::default(),
         };
 
         // Built before the migrations, so a failure below still drops the database.
-        let app = TestApp {
-            router: routes::router(state),
+        // The real router needs the seeded permissions, so it replaces this one after.
+        let mut app = TestApp {
+            router: Router::new(),
             pool,
             config,
             db_name,
@@ -93,6 +96,15 @@ impl TestApp {
         db::run_migrations(&app.pool)
             .await
             .expect("run migrations on test database");
+        let state = AppState {
+            perms: Arc::new(
+                Permissions::load(&app.pool)
+                    .await
+                    .expect("load permissions"),
+            ),
+            ..state
+        };
+        app.router = routes::router(state);
         app
     }
 

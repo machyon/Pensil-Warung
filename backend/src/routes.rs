@@ -142,6 +142,7 @@ mod tests {
         AppState {
             pool,
             config: Arc::new(config),
+            perms: Arc::default(),
         }
     }
 
