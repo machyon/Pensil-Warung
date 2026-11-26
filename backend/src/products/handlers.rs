@@ -23,8 +23,11 @@ use crate::common::response::{Created, NoContent};
 use crate::error::{AppError, ErrorCode};
 use crate::state::AppState;
 
-/// Upload limit for `PUT /products/{id}/photo`, multipart framing included.
+/// Largest `photo` field accepted by `PUT /products/{id}/photo`.
 const PHOTO_MAX_BYTES: usize = 5 * 1024 * 1024;
+/// Room for the multipart framing around the photo, so a photo just under the
+/// limit is not cut off by the body limit.
+const MULTIPART_ALLOWANCE: usize = 64 * 1024;
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -38,7 +41,7 @@ pub fn routes() -> Router<AppState> {
             "/products/{id}/photo",
             put(put_photo)
                 .delete(delete_photo)
-                .layer(DefaultBodyLimit::max(PHOTO_MAX_BYTES)),
+                .layer(DefaultBodyLimit::max(PHOTO_MAX_BYTES + MULTIPART_ALLOWANCE)),
         )
 }
 
@@ -217,7 +220,11 @@ async fn read_photo_field(mut multipart: Multipart) -> Result<Vec<u8>, AppError>
     };
     while let Some(field) = multipart.next_field().await.map_err(to_error)? {
         if field.name() == Some("photo") {
-            return Ok(field.bytes().await.map_err(to_error)?.to_vec());
+            let bytes = field.bytes().await.map_err(to_error)?;
+            if bytes.len() > PHOTO_MAX_BYTES {
+                return Err(AppError::new(ErrorCode::PayloadTooLarge));
+            }
+            return Ok(bytes.to_vec());
         }
     }
     Err(invalid("field photo wajib diisi"))

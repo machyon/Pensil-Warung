@@ -679,3 +679,154 @@ async fn put_photo_without_storage_is_503() {
     assert_eq!(res.json["error"]["code"], "storage_unavailable");
     assert_eq!(photo_key_of(&app, &id).await, None);
 }
+
+async fn delete_photo(app: &TestApp, token: &str, id: &Value) -> common::TestResponse {
+    app.delete_json(&format!("{P}/{id}/photo"), Some(token), None)
+        .await
+}
+
+#[tokio::test]
+async fn photo_size_limit_applies_to_the_photo_bytes() {
+    let app = TestApp::new().await;
+    let token = app.register("Siti", "siti@example.com", "rahasia123").await;
+    let id = seed(&app, &token, "Nasi Goreng", 1).await;
+    let limit = 5 * 1024 * 1024;
+    let payload = |len: usize| {
+        let mut bytes = vec![7u8; len];
+        bytes[..8].copy_from_slice(b"\x89PNG\r\n\x1a\n");
+        bytes
+    };
+
+    // Past the size check, then rejected by the decoder: 415, not 413.
+    let res = put_photo(
+        &app,
+        &token,
+        &id,
+        "photo",
+        "image/png",
+        &payload(limit - 1000),
+    )
+    .await;
+    assert_eq!(res.status, StatusCode::UNSUPPORTED_MEDIA_TYPE);
+    let res = put_photo(&app, &token, &id, "photo", "image/png", &payload(limit)).await;
+    assert_eq!(res.status, StatusCode::UNSUPPORTED_MEDIA_TYPE);
+    let res = put_photo(&app, &token, &id, "photo", "image/png", &payload(limit + 1)).await;
+    assert_eq!(res.status, StatusCode::PAYLOAD_TOO_LARGE);
+    assert_eq!(res.json["error"]["code"], "payload_too_large");
+}
+
+#[tokio::test]
+async fn delete_photo_removes_the_object_and_is_idempotent() {
+    let app = TestApp::new().await;
+    let a = app.register("Siti", "siti@example.com", "rahasia123").await;
+    let b = app.register("Budi", "budi@example.com", "rahasia123").await;
+    let id = seed(&app, &a, "Nasi Goreng", 1).await;
+    let storage = app.storage.clone().unwrap();
+
+    // No photo yet: still 204.
+    assert_eq!(
+        delete_photo(&app, &a, &id).await.status,
+        StatusCode::NO_CONTENT
+    );
+
+    put_photo(&app, &a, &id, "photo", "image/png", &tiny_png()).await;
+    assert_eq!(storage.keys().len(), 1);
+    let res = delete_photo(&app, &b, &id).await;
+    assert_eq!(res.status, StatusCode::NOT_FOUND);
+    assert_eq!(storage.keys().len(), 1);
+
+    let res = delete_photo(&app, &a, &id).await;
+    assert_eq!(res.status, StatusCode::NO_CONTENT);
+    assert_eq!(photo_key_of(&app, &id).await, None);
+    assert!(storage.keys().is_empty());
+    assert_eq!(
+        delete_photo(&app, &a, &id).await.status,
+        StatusCode::NO_CONTENT
+    );
+    let res = app.get(&format!("{P}/{id}"), Some(&a)).await;
+    assert_eq!(res.json["photo_url"], Value::Null);
+}
+
+#[tokio::test]
+async fn delete_photo_without_storage_is_503() {
+    let app = TestApp::without_storage().await;
+    let token = app.register("Siti", "siti@example.com", "rahasia123").await;
+    let id = seed(&app, &token, "Nasi Goreng", 1).await;
+    let res = delete_photo(&app, &token, &id).await;
+    assert_eq!(res.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(res.json["error"]["code"], "storage_unavailable");
+}
+
+#[tokio::test]
+async fn deleting_a_product_removes_its_photo_object() {
+    let app = TestApp::new().await;
+    let token = app.register("Siti", "siti@example.com", "rahasia123").await;
+    let with = seed(&app, &token, "Nasi Goreng", 1).await;
+    let without = seed(&app, &token, "Teh", 1).await;
+    put_photo(&app, &token, &with, "photo", "image/png", &tiny_png()).await;
+    assert_eq!(app.storage.as_ref().unwrap().keys().len(), 1);
+
+    let res = app
+        .delete_json(&format!("{P}/{with}"), Some(&token), None)
+        .await;
+    assert_eq!(res.status, StatusCode::NO_CONTENT);
+    assert!(app.storage.as_ref().unwrap().keys().is_empty());
+    let res = app
+        .delete_json(&format!("{P}/{without}"), Some(&token), None)
+        .await;
+    assert_eq!(res.status, StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+async fn photo_url_is_presigned_only_for_products_with_a_photo() {
+    let app = TestApp::new().await;
+    let token = app.register("Siti", "siti@example.com", "rahasia123").await;
+    let with = seed(&app, &token, "Nasi Goreng", 1).await;
+    let without = seed(&app, &token, "Teh", 1).await;
+
+    let put = put_photo(&app, &token, &with, "photo", "image/png", &tiny_png()).await;
+    let key = photo_key_of(&app, &with).await.unwrap();
+    let expected = json!(format!("https://storage.test/{key}?ttl=3600"));
+    assert_eq!(put.json["photo_url"], expected);
+    let res = app.get(&format!("{P}/{with}"), Some(&token)).await;
+    assert_eq!(res.json["photo_url"], expected);
+    let res = app.get(&format!("{P}/{without}"), Some(&token)).await;
+    assert_eq!(res.json["photo_url"], Value::Null);
+
+    let res = app.get(P, Some(&token)).await;
+    let urls: Vec<&Value> = res.json["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| &p["photo_url"])
+        .collect();
+    assert_eq!(urls, [&expected, &Value::Null]); // Nasi Goreng, Teh
+
+    let res = app
+        .patch_json(
+            &format!("{P}/{with}"),
+            Some(&token),
+            &json!({"price": 2000}),
+        )
+        .await;
+    assert_eq!(res.json["photo_url"], expected);
+}
+
+#[tokio::test]
+async fn photo_url_is_null_without_storage() {
+    let app = TestApp::without_storage().await;
+    let token = app.register("Siti", "siti@example.com", "rahasia123").await;
+    let id = seed(&app, &token, "Nasi Goreng", 1).await;
+    app.client()
+        .await
+        .execute(
+            "UPDATE products SET photo_key = 'products/x/y.jpg' WHERE id = $1",
+            &[&id.as_i64().unwrap()],
+        )
+        .await
+        .unwrap();
+    let res = app.get(&format!("{P}/{id}"), Some(&token)).await;
+    assert_eq!(res.json["photo_url"], Value::Null);
+    let res = app.get(P, Some(&token)).await;
+    assert_eq!(res.json["items"][0]["photo_url"], Value::Null);
+}
