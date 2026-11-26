@@ -3,11 +3,14 @@
 use axum::Json;
 use axum::Router;
 use axum::extract::State;
-use axum::routing::get;
+use axum::routing::{get, post};
 use serde::Deserialize;
 
 use super::dto::{BroadcastItem, BroadcastWithBody, BroadcasterDetail, BroadcasterList};
-use super::{NewBroadcast, broadcaster_list, create, detail as find, feed, feed_one};
+use super::{
+    BroadcastPatch, NewBroadcast, broadcaster_list, cancel, create, detail as find, feed, feed_one,
+    update,
+};
 use crate::auth::extractor::AuthUser;
 use crate::auth::perms::Perm;
 use crate::common::extract::{ApiJson, ApiPath, ApiQuery};
@@ -24,6 +27,11 @@ pub fn routes() -> Router<AppState> {
             "/broadcaster/broadcasts",
             get(broadcaster_home).post(create_one),
         )
+        .route(
+            "/broadcaster/broadcasts/{id}",
+            get(broadcaster_detail).patch(update_one),
+        )
+        .route("/broadcaster/broadcasts/{id}/cancel", post(cancel_one))
 }
 
 async fn list(
@@ -92,4 +100,58 @@ async fn create_one(
     let id = create(&**client, user.id, &new).await?;
     let made = find(&**client, id).await?.ok_or_else(AppError::internal)?;
     Ok(Created(made))
+}
+
+async fn broadcaster_detail(
+    State(state): State<AppState>,
+    user: AuthUser,
+    ApiPath(id): ApiPath<i32>,
+) -> Result<Json<BroadcasterDetail>, AppError> {
+    state.perms.require(&user, Perm::BroadcastCreate)?;
+    let client = state.pool.get().await?;
+    let found = find(&**client, id).await?;
+    Ok(Json(found.ok_or_else(AppError::not_found)?))
+}
+
+#[derive(Deserialize)]
+struct PatchBody {
+    category: Option<String>,
+    title: Option<String>,
+    summary: Option<String>,
+    body: Option<String>,
+    /// Missing keeps the schedule, `null` sends now, a time reschedules.
+    #[serde(default, with = "serde_with::rust::double_option")]
+    send_at: Option<Option<String>>,
+}
+
+async fn update_one(
+    State(state): State<AppState>,
+    user: AuthUser,
+    ApiPath(id): ApiPath<i32>,
+    ApiJson(b): ApiJson<PatchBody>,
+) -> Result<Json<BroadcasterDetail>, AppError> {
+    state.perms.require(&user, Perm::BroadcastUpdate)?;
+    let patch = BroadcastPatch::new(
+        b.category.as_deref(),
+        b.title.as_deref(),
+        b.summary.as_deref(),
+        b.body.as_deref(),
+        b.send_at.as_ref().map(|s| s.as_deref()),
+    )?;
+    let client = state.pool.get().await?;
+    update(&**client, id, &patch).await?;
+    let found = find(&**client, id).await?;
+    Ok(Json(found.ok_or_else(AppError::not_found)?))
+}
+
+async fn cancel_one(
+    State(state): State<AppState>,
+    user: AuthUser,
+    ApiPath(id): ApiPath<i32>,
+) -> Result<Json<BroadcasterDetail>, AppError> {
+    state.perms.require(&user, Perm::BroadcastCancel)?;
+    let client = state.pool.get().await?;
+    cancel(&**client, user.id, id).await?;
+    let found = find(&**client, id).await?;
+    Ok(Json(found.ok_or_else(AppError::not_found)?))
 }

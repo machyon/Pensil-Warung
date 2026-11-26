@@ -212,3 +212,105 @@ pub async fn detail(client: &impl GenericClient, id: i32) -> AppResult<Option<Br
         .await?;
     Ok(row.as_ref().map(BroadcasterDetail::from))
 }
+
+/// A validated PATCH: at least one field. `send_at` is `None` to keep the schedule,
+/// `Some(None)` to send now or `Some(Some(t))` to reschedule.
+pub struct BroadcastPatch {
+    category: Option<String>,
+    title: Option<String>,
+    summary: Option<String>,
+    /// `Some(None)` clears the body (a blank one).
+    body: Option<Option<String>>,
+    send_now: bool,
+    reschedule: Option<OffsetDateTime>,
+}
+
+impl BroadcastPatch {
+    pub fn new(
+        category: Option<&str>,
+        title: Option<&str>,
+        summary: Option<&str>,
+        body: Option<&str>,
+        send_at: Option<Option<&str>>,
+    ) -> AppResult<Self> {
+        if category.is_none()
+            && title.is_none()
+            && summary.is_none()
+            && body.is_none()
+            && send_at.is_none()
+        {
+            return Err(AppError::new(ErrorCode::NothingToUpdate));
+        }
+        if let Some(c) = category {
+            check_category(c)?;
+        }
+        Ok(BroadcastPatch {
+            category: category.map(str::to_owned),
+            title: title.map(check_title).transpose()?,
+            summary: summary.map(check_summary).transpose()?,
+            body: body.map(check_body),
+            send_now: send_at == Some(None),
+            reschedule: send_at.flatten().map(check_send_at).transpose()?,
+        })
+    }
+}
+
+/// 404 if the broadcast does not exist, else 409 `not_editable`: it was already
+/// sent, cancelled or became due.
+async fn not_editable(client: &impl GenericClient, id: i32) -> AppError {
+    match client
+        .query_opt("SELECT 1 FROM broadcasts WHERE id = $1", &[&id])
+        .await
+    {
+        Ok(Some(_)) => AppError::new(ErrorCode::NotEditable),
+        Ok(None) => AppError::not_found(),
+        Err(e) => e.into(),
+    }
+}
+
+/// Changes a broadcast that is scheduled and not yet due (the guard also covers
+/// the moment it becomes due). Sending now keeps `scheduled_for` as it was.
+pub async fn update(client: &impl GenericClient, id: i32, patch: &BroadcastPatch) -> AppResult<()> {
+    let n = client
+        .execute(
+            "UPDATE broadcasts SET
+               category      = coalesce($2::text::broadcast_category, category),
+               title         = coalesce($3, title),
+               summary       = coalesce($4, summary),
+               body          = CASE WHEN $5::boolean THEN $6 ELSE body END,
+               status        = CASE WHEN $7::boolean THEN 'sent'::broadcast_status ELSE status END,
+               broadcasted_at = CASE WHEN $7::boolean THEN now() ELSE broadcasted_at END,
+               scheduled_for = coalesce($8::timestamptz, scheduled_for)
+             WHERE id = $1 AND status = 'scheduled' AND scheduled_for > now()",
+            &[
+                &id,
+                &patch.category,
+                &patch.title,
+                &patch.summary,
+                &patch.body.is_some(),
+                &patch.body.clone().flatten(),
+                &patch.send_now,
+                &patch.reschedule,
+            ],
+        )
+        .await?;
+    if n == 0 {
+        return Err(not_editable(client, id).await);
+    }
+    Ok(())
+}
+
+/// Cancels a scheduled, not yet due broadcast.
+pub async fn cancel(client: &impl GenericClient, user_id: Uuid, id: i32) -> AppResult<()> {
+    let n = client
+        .execute(
+            "UPDATE broadcasts SET status = 'cancelled', cancelled_at = now(), cancelled_by = $2
+              WHERE id = $1 AND status = 'scheduled' AND scheduled_for > now()",
+            &[&id, &user_id],
+        )
+        .await?;
+    if n == 0 {
+        return Err(not_editable(client, id).await);
+    }
+    Ok(())
+}
