@@ -366,3 +366,195 @@ async fn bulk_is_atomic_and_reports_the_duplicate_index() {
     assert_eq!(res.status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(count(&app).await, 1);
 }
+
+async fn note_of(app: &TestApp, product_id: i64) -> Vec<Option<String>> {
+    app.client()
+        .await
+        .query(
+            "SELECT note FROM stock_movements WHERE product_id = $1 ORDER BY id",
+            &[&product_id],
+        )
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| r.get(0))
+        .collect()
+}
+
+#[tokio::test]
+async fn patch_stock_writes_one_ledger_movement_per_change() {
+    let app = TestApp::new().await;
+    let a = app.register("Siti", "siti@example.com", "rahasia123").await;
+    let id = seed(&app, &a, "Nasi Goreng", 10).await;
+    let path = format!("{P}/{id}");
+    let pid = id.as_i64().unwrap();
+
+    let res = app
+        .patch_json(&path, Some(&a), &json!({"stock": 15, "note": "belanja"}))
+        .await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.text);
+    assert_eq!(res.json["stock"], json!(15));
+
+    let res = app
+        .patch_json(&path, Some(&a), &json!({"stock": 12, "note": "rusak"}))
+        .await;
+    assert_eq!(res.json["stock"], json!(12));
+
+    // Same stock: no movement, and the note is dropped.
+    let res = app
+        .patch_json(&path, Some(&a), &json!({"stock": 12, "note": "abaikan"}))
+        .await;
+    assert_eq!(res.status, StatusCode::OK);
+
+    let d = Decimal::from;
+    assert_eq!(
+        movements(&app, pid).await,
+        vec![
+            ("initial".to_owned(), d(10), d(10)),
+            ("restock".to_owned(), d(5), d(15)),
+            ("adjustment".to_owned(), d(-3), d(12)),
+        ]
+    );
+    assert_eq!(
+        note_of(&app, pid).await,
+        vec![None, Some("belanja".to_owned()), Some("rusak".to_owned())]
+    );
+
+    // Stock down to zero is allowed.
+    let res = app.patch_json(&path, Some(&a), &json!({"stock": 0})).await;
+    assert_eq!(res.json["stock"], json!(0));
+}
+
+#[tokio::test]
+async fn patch_name_and_price_without_stock_writes_no_movement() {
+    let app = TestApp::new().await;
+    let a = app.register("Siti", "siti@example.com", "rahasia123").await;
+    let id = seed(&app, &a, "Nasi Goreng", 4).await;
+    let path = format!("{P}/{id}");
+
+    // Re-casing its own name is not a clash.
+    let res = app
+        .patch_json(
+            &path,
+            Some(&a),
+            &json!({"name": "  NASI  goreng ", "price": 20000}),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.text);
+    assert_eq!(res.json["name"], "NASI goreng");
+    assert_eq!(res.json["price"], 20000);
+    assert_eq!(res.json["stock"], json!(4));
+    assert_eq!(movements(&app, id.as_i64().unwrap()).await.len(), 1);
+}
+
+#[tokio::test]
+async fn patch_validation_and_conflicts() {
+    let app = TestApp::new().await;
+    let a = app.register("Siti", "siti@example.com", "rahasia123").await;
+    seed(&app, &a, "Teh", 0).await;
+    let id = seed(&app, &a, "Kopi", 3).await;
+    let path = format!("{P}/{id}");
+
+    let res = app.patch_json(&path, Some(&a), &json!({})).await;
+    assert_eq!(res.status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(res.json["error"]["code"], "nothing_to_update");
+
+    let res = app.patch_json(&path, Some(&a), &json!({"note": "x"})).await;
+    assert_eq!(res.status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(res.json["error"]["code"], "invalid_value");
+    assert_eq!(res.json["error"]["details"]["field"], "note");
+
+    for body in [
+        json!({"stock": -1}),
+        json!({"price": -1}),
+        json!({"name": "  "}),
+        json!({"stock": 1, "note": "a".repeat(201)}),
+    ] {
+        let res = app.patch_json(&path, Some(&a), &body).await;
+        assert_eq!(res.status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    }
+
+    let res = app
+        .patch_json(&path, Some(&a), &json!({"name": "teh"}))
+        .await;
+    assert_eq!(res.status, StatusCode::CONFLICT);
+    assert_eq!(res.json["error"]["code"], "name_taken");
+
+    // Nothing above changed the product.
+    let res = app.get(&path, Some(&a)).await;
+    assert_eq!(res.json["name"], "Kopi");
+    assert_eq!(res.json["stock"], json!(3));
+    assert_eq!(movements(&app, id.as_i64().unwrap()).await.len(), 1);
+}
+
+#[tokio::test]
+async fn patch_and_delete_of_another_users_product_are_404() {
+    let app = TestApp::new().await;
+    let a = app.register("Siti", "siti@example.com", "rahasia123").await;
+    let b = app.register("Budi", "budi@example.com", "rahasia123").await;
+    let id = seed(&app, &a, "Nasi Goreng", 10).await;
+    let path = format!("{P}/{id}");
+
+    let res = app.patch_json(&path, Some(&b), &json!({"stock": 1})).await;
+    assert_eq!(res.status, StatusCode::NOT_FOUND);
+    let res = app.delete_json(&path, Some(&b), None).await;
+    assert_eq!(res.status, StatusCode::NOT_FOUND);
+    let res = app
+        .delete_json(&format!("{P}/999999"), Some(&a), None)
+        .await;
+    assert_eq!(res.status, StatusCode::NOT_FOUND);
+
+    let res = app.get(&path, Some(&a)).await;
+    assert_eq!(res.json["stock"], json!(10));
+}
+
+#[tokio::test]
+async fn delete_removes_movements_but_keeps_sale_snapshots() {
+    let app = TestApp::new().await;
+    let a = app.register("Siti", "siti@example.com", "rahasia123").await;
+    let uid = user_id(&app, "siti@example.com").await;
+    let id = seed(&app, &a, "Nasi Goreng", 10).await;
+    let pid = id.as_i64().unwrap();
+    let client = app.client().await;
+
+    // The items_sale_stock trigger also writes a 'sale' movement.
+    let tx_id: i64 = client
+        .query_one(
+            "INSERT INTO transactions (user_id, raw_text, total) VALUES ($1, 'nasi goreng 2', 2000)
+             RETURNING id",
+            &[&uid],
+        )
+        .await
+        .unwrap()
+        .get(0);
+    client
+        .execute(
+            "INSERT INTO transaction_items
+               (transaction_id, product_id, line_no, product_name, unit_price, quantity, line_total)
+             VALUES ($1, $2, 1, 'Nasi Goreng', 1000, 2, 2000)",
+            &[&tx_id, &pid],
+        )
+        .await
+        .unwrap();
+    assert_eq!(movements(&app, pid).await.len(), 2);
+
+    let res = app.delete_json(&format!("{P}/{id}"), Some(&a), None).await;
+    assert_eq!(res.status, StatusCode::NO_CONTENT);
+    assert_eq!(
+        app.get(&format!("{P}/{id}"), Some(&a)).await.status,
+        StatusCode::NOT_FOUND
+    );
+    assert!(movements(&app, pid).await.is_empty());
+
+    let row = client
+        .query_one(
+            "SELECT product_id, product_name, unit_price FROM transaction_items
+             WHERE transaction_id = $1",
+            &[&tx_id],
+        )
+        .await
+        .unwrap();
+    assert_eq!(row.get::<_, Option<i64>>(0), None);
+    assert_eq!(row.get::<_, String>(1), "Nasi Goreng");
+    assert_eq!(row.get::<_, i64>(2), 1000);
+}
