@@ -32,6 +32,7 @@ pub enum ErrorCode {
     GoogleAccount,
     ReauthRequired,
     StockInsufficient,
+    NothingToUpdate,
     NotEditable,
     TimePassed,
     PayloadTooLarge,
@@ -60,6 +61,7 @@ impl ErrorCode {
             ErrorCode::GoogleAccount => "google_account",
             ErrorCode::ReauthRequired => "reauth_required",
             ErrorCode::StockInsufficient => "stock_insufficient",
+            ErrorCode::NothingToUpdate => "nothing_to_update",
             ErrorCode::NotEditable => "not_editable",
             ErrorCode::TimePassed => "time_passed",
             ErrorCode::PayloadTooLarge => "payload_too_large",
@@ -116,6 +118,10 @@ impl ErrorCode {
                 "Silakan verifikasi ulang akun Anda untuk melanjutkan.",
             ),
             ErrorCode::StockInsufficient => (StatusCode::UNPROCESSABLE_ENTITY, "Stok tidak cukup."),
+            ErrorCode::NothingToUpdate => (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Tidak ada data yang diubah.",
+            ),
             ErrorCode::NotEditable => (StatusCode::CONFLICT, "Data ini tidak dapat diubah."),
             ErrorCode::TimePassed => (
                 StatusCode::UNPROCESSABLE_ENTITY,
@@ -271,7 +277,7 @@ mod tests {
     use super::*;
     use axum::body::to_bytes;
 
-    const ALL: [ErrorCode; 22] = [
+    const ALL: [ErrorCode; 23] = [
         ErrorCode::InvalidBody,
         ErrorCode::InvalidQuery,
         ErrorCode::InvalidPath,
@@ -289,6 +295,7 @@ mod tests {
         ErrorCode::GoogleAccount,
         ErrorCode::ReauthRequired,
         ErrorCode::StockInsufficient,
+        ErrorCode::NothingToUpdate,
         ErrorCode::NotEditable,
         ErrorCode::TimePassed,
         ErrorCode::PayloadTooLarge,

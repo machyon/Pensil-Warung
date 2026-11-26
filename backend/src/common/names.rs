@@ -17,9 +17,33 @@ pub fn sanitize_display_name(raw: &str) -> Option<String> {
     (!collapsed.is_empty()).then_some(collapsed)
 }
 
+/// Trims a product name and collapses runs of whitespace into single spaces.
+pub fn normalize_product_name(raw: &str) -> String {
+    raw.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Case-insensitive key for matching product names, like the DB index
+/// `lower(btrim(name))`. Stored names are already normalized, so it also ignores
+/// repeated spaces.
+pub fn name_key(raw: &str) -> String {
+    normalize_product_name(raw).to_lowercase()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn product_name_is_trimmed_and_collapsed() {
+        assert_eq!(normalize_product_name("  Nasi 	  Goreng "), "Nasi Goreng");
+        assert_eq!(normalize_product_name("   "), "");
+    }
+
+    #[test]
+    fn name_key_ignores_case_and_spacing() {
+        assert_eq!(name_key(" NASI  Goreng"), name_key("nasi goreng"));
+        assert_eq!(name_key("Es Teh"), "es teh");
+    }
 
     #[test]
     fn plain_name_is_unchanged() {

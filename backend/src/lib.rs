@@ -7,5 +7,6 @@ pub mod common;
 pub mod config;
 pub mod db;
 pub mod error;
+pub mod products;
 pub mod routes;
 pub mod state;

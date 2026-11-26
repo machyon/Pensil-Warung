@@ -39,7 +39,7 @@ Every error response has this shape:
 The default status and message come from `backend/src/error.rs`. "Used" says whether a route returns the code today:
 
 - **now**: returned by a route or the server today.
-- **SQL map**: mapped from a database error. No route writes data yet, so nothing returns it yet.
+- **SQL map**: mapped from a database error, but no route can reach it yet.
 - **later**: defined for a later branch.
 
 | Code | HTTP | Default message | Used | When |
@@ -47,20 +47,21 @@ The default status and message come from `backend/src/error.rs`. "Used" says whe
 | `invalid_body` | 400 | Isi permintaan tidak valid. | now | Malformed JSON, wrong shape, or missing JSON content type |
 | `invalid_query` | 400 | Parameter permintaan tidak valid. | now | A query string value does not parse |
 | `invalid_path` | 400 | Alamat permintaan tidak valid. | now | A path parameter does not parse |
-| `invalid_value` | 422 | Nilai yang dimasukkan tidak valid. | now | A field fails a rule (email format, username format, password length, field too long, missing `current_password`). A database check failure (other than stock) gives 422. An unknown unique index gives 409 with this code |
-| `invalid_name` | 422 | Nama yang dimasukkan tidak valid. | now | `PATCH /me/display-name`: empty after cleaning, or over 50 characters |
+| `invalid_value` | 422 | Nilai yang dimasukkan tidak valid. | now | A field fails a rule (email format, username format, password length, field too long, missing `current_password`, negative price or stock, `note` without `stock`, bulk size). A database check failure (other than stock) gives 422. An unknown unique index gives 409 with this code |
+| `invalid_name` | 422 | Nama yang dimasukkan tidak valid. | now | `PATCH /me/display-name`: empty after cleaning, or over 50 characters. Products: name empty or over 60 characters |
 | `not_found` | 404 | Data tidak ditemukan. | now | Unknown route, or the record does not exist |
 | `unauthorized` | 401 | Sesi Anda telah berakhir. Silakan masuk kembali. | now | Missing or invalid bearer token. `POST /auth/google` also returns it for a bad Google ID token, with the message "Token Google tidak valid." |
 | `invalid_credentials` | 401 | Email atau kata sandi salah. | now | Wrong email or password at login. Also a wrong `current_password` on the `/me` routes (message "Kata sandi saat ini salah.") |
-| `forbidden` | 403 | Anda tidak memiliki akses untuk tindakan ini. | later | Signed in, but not allowed (for example, not a broadcaster) |
+| `forbidden` | 403 | Anda tidak memiliki akses untuk tindakan ini. | now | Signed in, but the role lacks the permission (all `/products` routes need `product.manage`) |
 | `account_gone` | 401 | Akun tidak ditemukan. Silakan masuk kembali. | now | The user no longer exists. A foreign key violation (SQLSTATE 23503) maps here |
 | `email_taken` | 409 | Email sudah digunakan. | now | Unique violation on `users.email` (register or `PATCH /me/email` with an existing email) |
 | `username_taken` | 409 | Username sudah digunakan. | now | Unique violation on `users.username` (`PATCH /me/username`). Register and Google sign-up retry once before this can surface |
-| `name_taken` | 409 | Nama produk sudah digunakan. | SQL map | Unique violation on a product name for this user |
+| `name_taken` | 409 | Nama produk sudah digunakan. | now | Unique violation on a product name for this user (create, bulk, rename). Bulk adds `details.index` |
 | `email_registered` | 409 | Email ini sudah terdaftar. Silakan masuk dengan kata sandi. | now | Google sign-in with an email that already has a password account |
 | `google_account` | 403 | Akun ini masuk dengan Google, sehingga tidak dapat diubah di sini. | now | Email or password change on a Google-only account |
 | `reauth_required` | 401 | Silakan verifikasi ulang akun Anda untuk melanjutkan. | now | `DELETE /me` for a Google-only account without a fresh matching Google ID token |
-| `stock_insufficient` | 422 | Stok tidak cukup. | SQL map | A sale would take stock below zero |
+| `stock_insufficient` | 422 | Stok tidak cukup. | SQL map | A stock movement would take stock below zero. Not reachable from `/products` (PATCH sets an absolute stock >= 0), reserved for Catat |
+| `nothing_to_update` | 422 | Tidak ada data yang diubah. | now | `PATCH /products/{id}` with no fields |
 | `not_editable` | 409 | Data ini tidak dapat diubah. | later | The record cannot be changed in its current state |
 | `time_passed` | 422 | Waktu untuk tindakan ini sudah lewat. | later | The time window for an action has passed |
 | `payload_too_large` | 413 | Ukuran berkas terlalu besar. | now | Body is over the limit. The message says "berkas" (file) even for JSON |
@@ -217,3 +218,60 @@ Google-only users send a Google ID token from a fresh sign-in:
 - The token must pass the same checks as `POST /auth/google`, its `sub` must be this user's Google identity, and its `iat` must be at most 5 minutes old (a small clock skew into the future is allowed).
 - Errors: `invalid_credentials` (401, wrong password), `invalid_value` (422, password user without `current_password`), `reauth_required` (401, Google-only user with a missing, stale, invalid or mismatched token).
 - An old JWT of a deleted user still decodes: later `/me` calls return `401 account_gone`.
+
+## Products
+
+All routes need a bearer token and the `product.manage` permission (else `403 forbidden`). Every query is scoped to the caller: another user's product is `404 not_found`.
+
+Product object:
+
+```json
+{ "id": 1, "name": "Nasi Goreng", "price": 15000, "stock": 10, "photo_url": null, "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z" }
+```
+
+- `price` is whole rupiah. `stock` is a whole number, sent and returned as a JSON integer (a decimal such as `1.5` is `400 invalid_body`). `photo_url` is always `null` until the photo branch.
+- `name` is trimmed and inner whitespace collapsed, 1 to 60 characters. It is unique per user ignoring case (`Nasi Goreng` = `nasi  goreng`), else `409 name_taken`. Other users may reuse a name.
+- `price` and `stock` must be >= 0 (`422 invalid_value`, `details.field`).
+
+### GET /api/v1/products?q=
+
+`200 OK` with `{ "items": [product], "count": 2 }`: all of the user's products ordered by name (case-insensitive), not paged. `q` is an optional case-insensitive substring of the name; `%`, `_` and `\` match literally.
+
+### GET /api/v1/products/{id}
+
+`200 OK` with the product. `404 not_found` if it is not the user's.
+
+### POST /api/v1/products
+
+```json
+{ "name": "Nasi Goreng", "price": 15000, "stock": 10 }
+```
+
+`201 Created` with the product. A `stock` above 0 is recorded as an `initial` stock movement. Errors: `invalid_name`, `invalid_value` (422), `name_taken` (409).
+
+### POST /api/v1/products/bulk
+
+```json
+{ "items": [{ "name": "Teh", "price": 3000, "stock": 0 }, { "name": "Kopi", "price": 4000, "stock": 7 }] }
+```
+
+1 to 50 items. `201 Created` with `{ "items": [product] }` in request order. All or nothing: if any item fails, nothing is saved. A duplicate name returns `409 name_taken` with `details.index` (0-based): the later item when two items in the request clash, or the item that clashes with an existing product. Other errors are as for `POST /products`; `invalid_value` for a wrong item count has `details.field = "items"`.
+
+### PATCH /api/v1/products/{id}
+
+```json
+{ "name": "Nasi Goreng Spesial", "price": 18000, "stock": 12, "note": "belanja pasar" }
+```
+
+All fields are optional; `200 OK` with the updated product.
+
+- `stock` is the NEW absolute stock (integer >= 0), not a delta. The server compares it with the current stock inside one transaction (row locked) and records the difference in the stock ledger: a `restock` movement when it goes up, an `adjustment` when it goes down. The stock itself is never written directly.
+- If `stock` equals the current stock, nothing is recorded and `note` is ignored.
+- `note` (up to 200 characters after trimming) is stored on the movement. It is only valid together with `stock`: alone it is `422 invalid_value` with `details.field = "note"`.
+- An empty body (`{}`) is `422 nothing_to_update`.
+- Renaming follows the name rules above. Changing only the case of the product's own name is allowed.
+- Errors: `nothing_to_update`, `invalid_name`, `invalid_value` (422), `name_taken` (409), `not_found` (404).
+
+### DELETE /api/v1/products/{id}
+
+`204 No Content`; `404 not_found` if it is not the user's. A hard delete: the product's stock movements go with it, while past sale items keep their name and price snapshot (their `product_id` becomes null).
