@@ -225,3 +225,144 @@ async fn role_without_product_manage_is_forbidden() {
         StatusCode::FORBIDDEN
     );
 }
+
+fn item(name: &str, price: i64, stock: i64) -> Value {
+    json!({"name": name, "price": price, "stock": stock})
+}
+
+async fn count(app: &TestApp) -> i64 {
+    app.client()
+        .await
+        .query_one("SELECT count(*) FROM products", &[])
+        .await
+        .unwrap()
+        .get(0)
+}
+
+#[tokio::test]
+async fn post_creates_with_integer_stock_and_initial_movement() {
+    let app = TestApp::new().await;
+    let a = app.register("Siti", "siti@example.com", "rahasia123").await;
+    let res = app
+        .post_json(P, Some(&a), &item("  Nasi   Goreng ", 15000, 5))
+        .await;
+    assert_eq!(res.status, StatusCode::CREATED, "{}", res.text);
+    assert_eq!(res.json["name"], "Nasi Goreng");
+    assert_eq!(res.json["stock"], json!(5));
+    assert!(res.json["stock"].is_i64());
+    let id = res.json["id"].as_i64().unwrap();
+    assert_eq!(
+        movements(&app, id).await,
+        vec![("initial".to_owned(), Decimal::from(5), Decimal::from(5))]
+    );
+
+    let zero = app.post_json(P, Some(&a), &item("Teh", 3000, 0)).await;
+    assert_eq!(zero.json["stock"], json!(0));
+    assert!(
+        movements(&app, zero.json["id"].as_i64().unwrap())
+            .await
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn post_validates_and_rejects_duplicates() {
+    let app = TestApp::new().await;
+    let a = app.register("Siti", "siti@example.com", "rahasia123").await;
+    let b = app.register("Budi", "budi@example.com", "rahasia123").await;
+    app.post_json(P, Some(&a), &item("Nasi Goreng", 1, 1)).await;
+
+    let dup = app
+        .post_json(P, Some(&a), &item(" NASI  goreng", 1, 1))
+        .await;
+    assert_eq!(dup.status, StatusCode::CONFLICT);
+    assert_eq!(dup.json["error"]["code"], "name_taken");
+    // Another user may reuse the name.
+    let other = app.post_json(P, Some(&b), &item("Nasi Goreng", 1, 1)).await;
+    assert_eq!(other.status, StatusCode::CREATED);
+
+    for body in [
+        item("   ", 1, 1),
+        item(&"a".repeat(61), 1, 1),
+        item("x", -1, 1),
+        item("x", 1, -1),
+    ] {
+        let res = app.post_json(P, Some(&a), &body).await;
+        assert_eq!(res.status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    }
+    // A fractional stock is not an integer.
+    let res = app
+        .post_json(P, Some(&a), &json!({"name": "x", "price": 1, "stock": 1.5}))
+        .await;
+    assert!(res.status.is_client_error());
+    assert_eq!(res.json["error"]["code"], "invalid_body");
+    assert_eq!(count(&app).await, 2);
+}
+
+#[tokio::test]
+async fn bulk_creates_all_items() {
+    let app = TestApp::new().await;
+    let a = app.register("Siti", "siti@example.com", "rahasia123").await;
+    let res = app
+        .post_json(
+            &format!("{P}/bulk"),
+            Some(&a),
+            &json!({"items": [item("Teh", 3000, 0), item("Kopi", 4000, 7)]}),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::CREATED, "{}", res.text);
+    let items = res.json["items"].as_array().unwrap();
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[1]["stock"], json!(7));
+    assert_eq!(count(&app).await, 2);
+
+    for body in [
+        json!({"items": []}),
+        json!({"items": vec![item("x", 1, 1); 51]}),
+    ] {
+        let res = app.post_json(&format!("{P}/bulk"), Some(&a), &body).await;
+        assert_eq!(res.status, StatusCode::UNPROCESSABLE_ENTITY);
+    }
+}
+
+#[tokio::test]
+async fn bulk_is_atomic_and_reports_the_duplicate_index() {
+    let app = TestApp::new().await;
+    let a = app.register("Siti", "siti@example.com", "rahasia123").await;
+    app.post_json(P, Some(&a), &item("Kopi", 1, 1)).await;
+    let bulk = format!("{P}/bulk");
+
+    // Duplicate inside the batch: the later item's index.
+    let res = app
+        .post_json(
+            &bulk,
+            Some(&a),
+            &json!({"items": [item("Teh", 1, 1), item("Gula", 1, 1), item(" TEH ", 1, 1)]}),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::CONFLICT);
+    assert_eq!(res.json["error"]["code"], "name_taken");
+    assert_eq!(res.json["error"]["details"]["index"], 2);
+
+    // Clash with an existing product: that item's index, and nothing is kept.
+    let res = app
+        .post_json(
+            &bulk,
+            Some(&a),
+            &json!({"items": [item("Teh", 1, 1), item("kopi", 1, 1), item("Gula", 1, 1)]}),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::CONFLICT);
+    assert_eq!(res.json["error"]["details"]["index"], 1);
+
+    // An invalid item also leaves nothing behind.
+    let res = app
+        .post_json(
+            &bulk,
+            Some(&a),
+            &json!({"items": [item("Teh", 1, 1), item("Bad", -5, 1)]}),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(count(&app).await, 1);
+}
