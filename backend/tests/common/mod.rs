@@ -171,8 +171,14 @@ impl TestApp {
             )
             .await
             .expect("insert google identity");
-        backend::auth::jwt::issue_token(&self.config.jwt_secret, id, 1, self.config.jwt_expires_in)
-            .expect("token")
+        backend::auth::jwt::issue_token(
+            &self.config.jwt_secret,
+            id,
+            1,
+            0,
+            self.config.jwt_expires_in,
+        )
+        .expect("token")
     }
 
     /// Sends one request through the router. A JSON `body` sets the content type.

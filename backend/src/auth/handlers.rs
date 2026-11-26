@@ -85,11 +85,12 @@ pub(crate) fn check_password_len(password: &str) -> Result<(), AppError> {
     max_len("password", password, MAX_PASSWORD_CHARS)
 }
 
-fn token_for(state: &AppState, id: Uuid, role_id: i32) -> Result<String, AppError> {
+fn token_for(state: &AppState, id: Uuid, role_id: i32, version: i32) -> Result<String, AppError> {
     issue_token(
         &state.config.jwt_secret,
         id,
         role_id,
+        version,
         state.config.jwt_expires_in,
     )
 }
@@ -164,7 +165,7 @@ async fn register(
     .await?;
 
     let user = load_user(&client, &state.perms, id).await?;
-    let token = token_for(&state, id, role_id)?;
+    let token = token_for(&state, id, role_id, 0)?; // new users start at version 0
     Ok(Created(AuthResponse { token, user }))
 }
 
@@ -176,7 +177,7 @@ async fn login(
     let client = state.pool.get().await?;
     let row = client
         .query_opt(
-            "SELECT u.id, u.role_id, a.password_hash
+            "SELECT u.id, u.role_id, u.token_version, a.password_hash
                FROM users u
                LEFT JOIN auth_identities a ON a.user_id = u.id AND a.provider = 'password'
               WHERE u.email = $1",
@@ -185,23 +186,28 @@ async fn login(
         .await?;
     let found = row.as_ref().and_then(|r| {
         let hash: Option<String> = r.get("password_hash");
-        Some((r.get::<_, Uuid>("id"), r.get::<_, i32>("role_id"), hash?))
+        Some((
+            r.get::<_, Uuid>("id"),
+            r.get::<_, i32>("role_id"),
+            r.get::<_, i32>("token_version"),
+            hash?,
+        ))
     });
     // Unknown email and Google-only accounts still pay for one Argon2 verify.
     let stored = found
         .as_ref()
-        .map_or_else(|| DUMMY_HASH.clone(), |(_, _, hash)| hash.clone());
+        .map_or_else(|| DUMMY_HASH.clone(), |(.., hash)| hash.clone());
     let password = body.password;
     let ok = tokio::task::spawn_blocking(move || verify_password(&password, &stored))
         .await
         .map_err(|_| AppError::internal())?;
-    let (id, role_id) = match found {
-        Some((id, role_id, _)) if ok => (id, role_id),
+    let (id, role_id, version) = match found {
+        Some((id, role_id, version, _)) if ok => (id, role_id, version),
         _ => return Err(AppError::new(ErrorCode::InvalidCredentials)),
     };
 
     let user = load_user(&client, &state.perms, id).await?;
-    let token = token_for(&state, id, role_id)?;
+    let token = token_for(&state, id, role_id, version)?;
     Ok(Json(AuthResponse { token, user }))
 }
 
@@ -234,13 +240,18 @@ async fn google(
     let mut client = state.pool.get().await?;
     let known = client
         .query_opt(
-            "SELECT u.id, u.role_id FROM auth_identities a JOIN users u ON u.id = a.user_id
+            "SELECT u.id, u.role_id, u.token_version FROM auth_identities a JOIN users u ON u.id = a.user_id
               WHERE a.provider = 'google' AND a.provider_user_id = $1",
             &[&claims.sub],
         )
         .await?;
-    let (id, role_id, created) = match known {
-        Some(row) => (row.get("id"), row.get("role_id"), false),
+    let (id, role_id, version, created) = match known {
+        Some(row) => (
+            row.get("id"),
+            row.get("role_id"),
+            row.get("token_version"),
+            false,
+        ),
         None => {
             // No account linking: an email that already has an account must sign in the old way.
             if client
@@ -260,12 +271,12 @@ async fn google(
                 None,
             )
             .await?;
-            (id, role_id, true)
+            (id, role_id, 0, true)
         }
     };
 
     let user = load_user(&client, &state.perms, id).await?;
-    let token = token_for(&state, id, role_id)?;
+    let token = token_for(&state, id, role_id, version)?;
     let status = if created {
         StatusCode::CREATED
     } else {

@@ -167,7 +167,7 @@ async fn set_email(
     update_and_load(
         &state,
         user.id,
-        "UPDATE users SET email = $1 WHERE id = $2",
+        "UPDATE users SET email = $1, token_version = token_version + 1 WHERE id = $2",
         &email,
     )
     .await
@@ -190,8 +190,10 @@ async fn set_password(
     let hash = hash_blocking(body.new_password).await?;
     client
         .execute(
-            "UPDATE auth_identities SET password_hash = $1
-              WHERE user_id = $2 AND provider = 'password'",
+            "WITH p AS (UPDATE auth_identities SET password_hash = $1
+                          WHERE user_id = $2 AND provider = 'password' RETURNING 1)
+             UPDATE users SET token_version = token_version + 1
+              WHERE id = $2 AND EXISTS (SELECT 1 FROM p)",
             &[&hash, &user.id],
         )
         .await?;
