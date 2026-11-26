@@ -1,13 +1,15 @@
 //! `POST /auth/register` and `POST /auth/login`.
 
-use axum::Router;
+use std::sync::LazyLock;
+
 use axum::extract::State;
 use axum::routing::post;
+use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::jwt::issue_token;
-use super::password::hash_password;
+use super::password::{hash_password, verify_password};
 use super::user::{UserResponse, load_user};
 use crate::common::extract::ApiJson;
 use crate::common::names::sanitize_display_name;
@@ -20,8 +22,14 @@ const MIN_PASSWORD_CHARS: usize = 8;
 /// Upper bound so a huge password cannot be used to burn Argon2 CPU.
 const MAX_PASSWORD_CHARS: usize = 128;
 
+/// Verified against when the email is unknown, so timing does not reveal it.
+static DUMMY_HASH: LazyLock<String> =
+    LazyLock::new(|| hash_password("dummy-password").unwrap_or_default());
+
 pub fn routes() -> Router<AppState> {
-    Router::new().route("/auth/register", post(register))
+    Router::new()
+        .route("/auth/register", post(register))
+        .route("/auth/login", post(login))
 }
 
 #[derive(Serialize)]
@@ -51,6 +59,12 @@ impl Validate for RegisterBody {
         }
         check_password_len(&self.password)
     }
+}
+
+#[derive(Deserialize)]
+struct LoginBody {
+    email: String,
+    password: String,
 }
 
 fn normalize_email(raw: &str) -> Result<String, AppError> {
@@ -130,4 +144,41 @@ async fn register(
     let user = load_user(&client, &state.perms, id).await?;
     let token = token_for(&state, id, role_id)?;
     Ok(Created(AuthResponse { token, user }))
+}
+
+async fn login(
+    State(state): State<AppState>,
+    ApiJson(body): ApiJson<LoginBody>,
+) -> Result<Json<AuthResponse>, AppError> {
+    let email = normalize_email(&body.email)?;
+    let client = state.pool.get().await?;
+    let row = client
+        .query_opt(
+            "SELECT u.id, u.role_id, a.password_hash
+               FROM users u
+               LEFT JOIN auth_identities a ON a.user_id = u.id AND a.provider = 'password'
+              WHERE u.email = $1",
+            &[&email],
+        )
+        .await?;
+    let found = row.as_ref().and_then(|r| {
+        let hash: Option<String> = r.get("password_hash");
+        Some((r.get::<_, Uuid>("id"), r.get::<_, i32>("role_id"), hash?))
+    });
+    // Unknown email and Google-only accounts still pay for one Argon2 verify.
+    let stored = found
+        .as_ref()
+        .map_or_else(|| DUMMY_HASH.clone(), |(_, _, hash)| hash.clone());
+    let password = body.password;
+    let ok = tokio::task::spawn_blocking(move || verify_password(&password, &stored))
+        .await
+        .map_err(|_| AppError::internal())?;
+    let (id, role_id) = match found {
+        Some((id, role_id, _)) if ok => (id, role_id),
+        _ => return Err(AppError::new(ErrorCode::InvalidCredentials)),
+    };
+
+    let user = load_user(&client, &state.perms, id).await?;
+    let token = token_for(&state, id, role_id)?;
+    Ok(Json(AuthResponse { token, user }))
 }
