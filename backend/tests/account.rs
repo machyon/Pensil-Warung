@@ -304,6 +304,16 @@ async fn password_too_short_is_422() {
         .await;
     assert_eq!(res.status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(res.json["error"]["code"], "invalid_value");
+    assert_eq!(res.json["error"]["details"]["field"], "new_password");
+    let long = app
+        .put_json(
+            "/api/v1/me/password",
+            Some(&token),
+            &json!({"current_password": "rahasia123", "new_password": "x".repeat(129)}),
+        )
+        .await;
+    assert_eq!(long.status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(long.json["error"]["details"]["field"], "new_password");
 }
 
 #[tokio::test]

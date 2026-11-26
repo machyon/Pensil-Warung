@@ -59,7 +59,7 @@ impl Validate for RegisterBody {
                 "Format email tidak valid.",
             ));
         }
-        check_password_len(&self.password)
+        check_password_len("password", &self.password)
     }
 }
 
@@ -73,16 +73,16 @@ pub(crate) fn normalize_email(raw: &str) -> Result<String, AppError> {
     Ok(trim_required("email", raw)?.to_lowercase())
 }
 
-pub(crate) fn check_password_len(password: &str) -> Result<(), AppError> {
+pub(crate) fn check_password_len(field: &str, password: &str) -> Result<(), AppError> {
     let len = password.chars().count();
     if len < MIN_PASSWORD_CHARS {
         return Err(AppError::validation(
             ErrorCode::InvalidValue,
-            "password",
+            field,
             format!("Kata sandi minimal {MIN_PASSWORD_CHARS} karakter."),
         ));
     }
-    max_len("password", password, MAX_PASSWORD_CHARS)
+    max_len(field, password, MAX_PASSWORD_CHARS)
 }
 
 fn token_for(state: &AppState, id: Uuid, role_id: i32, version: i32) -> Result<String, AppError> {

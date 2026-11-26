@@ -184,7 +184,7 @@ async fn set_password(
     user: AuthUser,
     ApiJson(body): ApiJson<PasswordBody>,
 ) -> Result<NoContent, AppError> {
-    check_password_len(&body.new_password)?;
+    check_password_len("new_password", &body.new_password)?;
     let client = state.pool.get().await?;
     check_current_password(&client, user.id, body.current_password).await?;
     let hash = hash_blocking(body.new_password).await?;
