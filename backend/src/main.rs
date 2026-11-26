@@ -1,20 +1,12 @@
-#![allow(dead_code)]
-
-mod common;
-mod config;
-mod db;
-mod error;
-mod routes;
-mod state;
-
 use std::process::ExitCode;
 use std::sync::Arc;
 
 use clap::{Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
 
-use crate::config::{AppEnv, Config};
-use crate::state::AppState;
+use backend::config::{AppEnv, Config};
+use backend::state::AppState;
+use backend::{db, routes};
 
 #[derive(Parser)]
 #[command(name = "backend", about = "Pensil Warung API server")]

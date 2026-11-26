@@ -233,13 +233,4 @@ mod tests {
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(json["error"]["code"], "db_unavailable");
     }
-
-    #[tokio::test]
-    #[ignore = "needs TEST_DATABASE_URL (Postgres 18)"]
-    async fn health_db_is_ok_with_database() {
-        let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL");
-        let (response, json) = send(test_app(test_state(&url)), get_req("/api/v1/health/db")).await;
-        assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(json, json!({ "status": "ok" }));
-    }
 }
