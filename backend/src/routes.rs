@@ -33,7 +33,8 @@ pub fn router(state: AppState) -> Router {
 fn api_routes() -> Router<AppState> {
     let v1 = Router::new()
         .route("/health/db", get(health_db))
-        .merge(crate::auth::handlers::routes());
+        .merge(crate::auth::handlers::routes())
+        .merge(crate::account::handlers::routes());
     Router::new()
         .route("/health", get(health))
         .nest("/api/v1", v1)
