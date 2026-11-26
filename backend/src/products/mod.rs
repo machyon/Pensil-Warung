@@ -281,15 +281,9 @@ pub async fn get(client: &impl GenericClient, user_id: Uuid, id: i64) -> AppResu
     Ok(Product::from(&row))
 }
 
-/// All of the user's products by name, optionally filtered by a case-insensitive
-/// substring of the name (`%`, `_` and `\` in `q` match literally).
-pub async fn list(
-    client: &impl GenericClient,
-    user_id: Uuid,
-    q: Option<&str>,
-) -> AppResult<Vec<Product>> {
-    let pattern = q
-        .map(normalize_product_name)
+/// `%q%` for ILIKE with `%`, `_` and `\` escaped; `None` for a missing or blank `q`.
+pub fn like_pattern(q: Option<&str>) -> Option<String> {
+    q.map(normalize_product_name)
         .filter(|q| !q.is_empty())
         .map(|q| {
             let escaped = q
@@ -297,7 +291,17 @@ pub async fn list(
                 .replace('%', "\\%")
                 .replace('_', "\\_");
             format!("%{escaped}%")
-        });
+        })
+}
+
+/// All of the user's products by name, optionally filtered by a case-insensitive
+/// substring of the name (`%`, `_` and `\` in `q` match literally).
+pub async fn list(
+    client: &impl GenericClient,
+    user_id: Uuid,
+    q: Option<&str>,
+) -> AppResult<Vec<Product>> {
+    let pattern = like_pattern(q);
     let rows = client
         .query(
             &format!(
