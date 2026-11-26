@@ -443,3 +443,75 @@ Request body is optional: no body (or an empty one) means no reason. A body with
 - Voiding is final; there is no un-void.
 
 Errors: `not_found` (404, no such transaction for this user), `already_voided` (409), `invalid_value` (422), `forbidden` (403).
+
+## Analytics
+
+Needs `analytics.read`, else `403 forbidden`. Every route only sees the caller's own data and counts completed transactions only (voided ones are ignored everywhere). Days and months are Asia/Jakarta (WIB). Quantities and money are JSON integers (whole rupiah); percentages are numbers with one decimal.
+
+Parameters:
+
+- `month`: `YYYY-MM`, default the current WIB month. A bad format or a month after the current one is `422 invalid_value` with `details.field` `month`. A month before the first sale is allowed and comes back empty.
+- `date` (path of the day route): `YYYY-MM-DD`. A bad date or a date after today (WIB) is `422 invalid_value` with `details.field` `date`.
+
+Grouping and names: items are grouped by product when the product still exists, and show its current name (so a rename moves the old sales under the new name) and its current `stock`. Sales of a deleted product are grouped by the name saved on the sale, have `product_id: null` and `stock: null`. Items are ranked by quantity, then revenue.
+
+### GET /api/v1/analytics/months
+
+`[{ "month": "2026-11", "revenue": 18175000 }]`: only months with sales, newest first. A new user gets `[]`. Use it for the month picker limits.
+
+### GET /api/v1/analytics/month?month=
+
+```json
+{
+  "month": "2026-11", "through_day": 17,
+  "revenue": 18175000, "transaction_count": 641,
+  "previous": { "month": "2026-10", "revenue": 16800000, "change_pct": 8.2 },
+  "trend": [ { "month": "2025-12", "revenue": 21400000 } ],
+  "weekday_avg": [ { "weekday": 1, "avg_revenue": 887000 } ],
+  "top_items": [ { "name": "Es teh manis", "qty": 512, "revenue": 2560000, "stock": 37 } ]
+}
+```
+
+- `through_day` is today's day for the current month, otherwise the last day of the month. `revenue` and `transaction_count` cover days 1 to `through_day`.
+- `previous` is the same day range of the previous month (clamped to its length). `change_pct` is `(revenue - previous) / previous * 100`, rounded half away from zero to one decimal, and `null` when the previous revenue is 0.
+- `trend` has exactly 12 entries, oldest first, ending with `month` (which may be unfinished). Months without sales have `revenue: 0`. The design showed 6 bars, so the client must show 12.
+- `weekday_avg` is `null` while the month has fewer than 14 days with sales. Otherwise it has 7 entries (`weekday` 1 = Monday to 7 = Sunday). Each average is over every calendar day from the 1st to `through_day`, and days without sales count as Rp0 (Mondays = revenue on all Mondays so far divided by the number of Mondays so far).
+- `top_items`: the top 5 over days 1 to `through_day`.
+
+### GET /api/v1/analytics/month/days?month=&cursor=&limit=
+
+"Per hari". Days of the month that have sales (days 1 to `through_day`), newest first.
+
+```json
+{ "items": [ { "day": "2026-11-17", "transaction_count": 38, "revenue": 1250000 } ],
+  "next_cursor": "MjAyNi0xMS0xNg" }
+```
+
+`limit` is 1 to 100, default 20 (clamped). `cursor` is the opaque `next_cursor` of the previous page; pass it back unchanged with the same `month`. It encodes the last day returned, so paging never repeats a day. A bad cursor is `422 invalid_value` with `details.field` `cursor`. `next_cursor` is `null` on the last page.
+
+### GET /api/v1/analytics/days/{date}/items
+
+A day row expanded.
+
+```json
+{ "items": [ { "product_id": 4, "name": "Nasi goreng", "qty": 30, "revenue": 450000 } ],
+  "other_revenue": 120000, "total": 1250000 }
+```
+
+`items` are the top 3 by quantity, then revenue. `total` is the day's revenue and `other_revenue` is `total` minus the revenue of `items`. A day without sales gives `items: []` and zeros.
+
+### GET /api/v1/analytics/month/items?month=&q=
+
+Screen "Semua barang terjual".
+
+```json
+{ "total_qty": 2184, "revenue": 18175000,
+  "items": [ { "product_id": 4, "name": "Es teh manis", "qty": 512, "share_pct": 23.4,
+               "revenue": 2560000, "stock": 37 } ],
+  "unsold": [ { "id": 9, "name": "Roti", "stock": 12 } ] }
+```
+
+- `items` are not paged. `share_pct` is `qty / total_qty * 100`, rounded half away from zero to one decimal (so the shares sum to about 100, not exactly).
+- `unsold` is the user's current products with no completed sale in the month, by name.
+- `q` filters both `items` and `unsold` by name: case-insensitive contains, with `%`, `_` and `\` matching literally. `total_qty`, `revenue` and `share_pct` stay whole-month figures whatever `q` is.
+- There is no low-stock flag in v1 ("hampir habis" is dropped, see `docs/note.md`).
