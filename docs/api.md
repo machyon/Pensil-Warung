@@ -64,7 +64,9 @@ The default status and message come from `backend/src/error.rs`. "Used" says whe
 | `nothing_to_update` | 422 | Tidak ada data yang diubah. | now | `PATCH /products/{id}` with no fields |
 | `not_editable` | 409 | Data ini tidak dapat diubah. | later | The record cannot be changed in its current state |
 | `time_passed` | 422 | Waktu untuk tindakan ini sudah lewat. | later | The time window for an action has passed |
-| `payload_too_large` | 413 | Ukuran berkas terlalu besar. | now | Body is over the limit. The message says "berkas" (file) even for JSON |
+| `payload_too_large` | 413 | Ukuran berkas terlalu besar. | now | Body is over the limit, or the `photo` file is over 5 MB (`PUT /products/{id}/photo`). The message says "berkas" (file) even for JSON |
+| `unsupported_image` | 415 | Foto harus berformat JPEG, PNG, atau WebP. | now | `PUT /products/{id}/photo`: the bytes are not a decodable JPEG, PNG or WebP (or the image is over 8000 px on a side) |
+| `storage_unavailable` | 503 | Penyimpanan foto belum tersedia. | now | Photo storage is not configured, or the upload to it failed. Both photo routes return it |
 | `db_unavailable` | 503 | Layanan sedang tidak tersedia. Coba lagi sebentar. | now | No database connection could be made, or the connection dropped |
 | `internal` | 500 | Terjadi kesalahan pada server. | now | Unexpected error, including an unmapped database error. The timeout also uses this code, with status 504 and the message "Permintaan terlalu lama diproses. Coba lagi sebentar." |
 
@@ -229,7 +231,7 @@ Product object:
 { "id": 1, "name": "Nasi Goreng", "price": 15000, "stock": 10, "photo_url": null, "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z" }
 ```
 
-- `price` is whole rupiah. `stock` is a whole number, sent and returned as a JSON integer (a decimal such as `1.5` is `400 invalid_body`). `photo_url` is always `null` until the photo branch.
+- `price` is whole rupiah. `stock` is a whole number, sent and returned as a JSON integer (a decimal such as `1.5` is `400 invalid_body`). `photo_url` is described under Photos below.
 - `name` is trimmed and inner whitespace collapsed, 1 to 60 characters. It is unique per user ignoring case (`Nasi Goreng` = `nasi  goreng`), else `409 name_taken`. Other users may reuse a name.
 - `price` and `stock` must be >= 0 (`422 invalid_value`, `details.field`).
 
@@ -275,3 +277,17 @@ All fields are optional; `200 OK` with the updated product.
 ### DELETE /api/v1/products/{id}
 
 `204 No Content`; `404 not_found` if it is not the user's. A hard delete: the product's stock movements go with it, while past sale items keep their name and price snapshot (their `product_id` becomes null).
+
+### Photos
+
+`photo_url` is a presigned URL for the product's photo, or `null` when the product has no photo (or the server has no photo storage). The URL expires after `IMAGE_URL_TTL_SECONDS` (default 3600) and is different on every response, so the client should cache the image by product id plus photo (for example `updated_at` after a photo change), not by URL. Every product response carries it: list, get, create, bulk, patch and the photo PUT.
+
+#### PUT /api/v1/products/{id}/photo
+
+`multipart/form-data` with one file field named `photo`: JPEG, PNG or WebP, at most 5 MB. The type is detected from the file bytes, the client's content type is ignored. The server stores it as a JPEG with the longest side at most 512 px (never enlarged, transparency becomes white), replacing any earlier photo. `200 OK` with the product, including its new `photo_url`.
+
+Errors: `invalid_body` (400, no `photo` field or bad multipart), `not_found` (404), `payload_too_large` (413), `unsupported_image` (415), `storage_unavailable` (503).
+
+#### DELETE /api/v1/products/{id}/photo
+
+`204 No Content`. Idempotent: also 204 when the product has no photo. Errors: `not_found` (404), `storage_unavailable` (503).
