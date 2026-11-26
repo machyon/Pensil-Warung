@@ -3,6 +3,7 @@
 //! `plan` resolves product names across the batch into an executable plan.
 
 pub mod dto;
+pub mod exec;
 pub mod plan;
 
 use rust_decimal::Decimal;

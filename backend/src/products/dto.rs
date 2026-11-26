@@ -22,7 +22,7 @@ pub struct ProductResponse {
     updated_at: String,
 }
 
-fn rfc3339(t: OffsetDateTime) -> String {
+pub fn rfc3339(t: OffsetDateTime) -> String {
     t.format(&Rfc3339).unwrap_or_default()
 }
 
