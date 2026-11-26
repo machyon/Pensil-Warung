@@ -8,12 +8,12 @@ use std::collections::HashMap;
 
 use rust_decimal::prelude::ToPrimitive;
 use time::OffsetDateTime;
-use tokio_postgres::GenericClient;
+use tokio_postgres::{GenericClient, Row};
 use uuid::Uuid;
 
 use crate::common::pagination::Cursor;
 use crate::error::AppResult;
-use dto::{DaySummary, TransactionListItem};
+use dto::{DaySummary, ItemResponse, TransactionListItem, TransactionResponse};
 
 /// Items named in a list row's `summary` before " +N lainnya".
 const SUMMARY_ITEMS: usize = 3;
@@ -30,6 +30,43 @@ fn summary(items: &[(String, i64)]) -> String {
         s.push_str(&format!(" +{} lainnya", items.len() - SUMMARY_ITEMS));
     }
     s
+}
+
+/// Columns `TransactionResponse::new` reads.
+pub const TRANSACTION_COLUMNS: &str =
+    "id, raw_text, total, status::text AS status, occurred_at, voided_at, void_reason";
+
+/// Adds a transaction row's items (in `line_no` order) to build the response.
+pub async fn with_items(client: &impl GenericClient, row: &Row) -> AppResult<TransactionResponse> {
+    let items = client
+        .query(
+            "SELECT id, line_no, product_id, product_name, unit_price, quantity, line_total
+               FROM transaction_items WHERE transaction_id = $1 ORDER BY line_no",
+            &[&row.get::<_, i64>("id")],
+        )
+        .await?;
+    let items = items.iter().map(ItemResponse::from).collect();
+    Ok(TransactionResponse::new(row, items))
+}
+
+/// The user's transaction with its items; `None` if it is not theirs.
+pub async fn find(
+    client: &impl GenericClient,
+    user_id: Uuid,
+    id: i64,
+) -> AppResult<Option<TransactionResponse>> {
+    let row = client
+        .query_opt(
+            &format!(
+                "SELECT {TRANSACTION_COLUMNS} FROM transactions WHERE user_id = $1 AND id = $2"
+            ),
+            &[&user_id, &id],
+        )
+        .await?;
+    match row {
+        Some(row) => Ok(Some(with_items(client, &row).await?)),
+        None => Ok(None),
+    }
 }
 
 /// One page of the user's transactions in `[start, end)`, newest first, after

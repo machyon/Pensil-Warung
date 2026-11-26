@@ -8,18 +8,20 @@ use serde::{Deserialize, Serialize};
 use time::Date;
 use time::macros::format_description;
 
-use super::dto::{DaySummary, TransactionListItem};
-use super::{day_summary, list_day};
+use super::dto::{DaySummary, TransactionListItem, TransactionResponse};
+use super::{day_summary, find, list_day};
 use crate::auth::extractor::AuthUser;
 use crate::auth::perms::Perm;
-use crate::common::extract::ApiQuery;
+use crate::common::extract::{ApiPath, ApiQuery};
 use crate::common::pagination::{Cursor, Page, clamp_limit};
 use crate::common::time::{today_wib, wib_day_bounds};
 use crate::error::{AppError, ErrorCode};
 use crate::state::AppState;
 
 pub fn routes() -> Router<AppState> {
-    Router::new().route("/transactions", get(list))
+    Router::new()
+        .route("/transactions", get(list))
+        .route("/transactions/{id}", get(detail))
 }
 
 #[derive(Deserialize)]
@@ -71,4 +73,15 @@ async fn list(
     };
     let page = Page::new(rows, limit, |t| t.cursor);
     Ok(Json(ListResponse { page, day }))
+}
+
+async fn detail(
+    State(state): State<AppState>,
+    user: AuthUser,
+    ApiPath(id): ApiPath<i64>,
+) -> Result<Json<TransactionResponse>, AppError> {
+    state.perms.require(&user, Perm::TransactionRead)?;
+    let client = state.pool.get().await?;
+    let t = find(&**client, user.id, id).await?;
+    t.map(Json).ok_or_else(AppError::not_found)
 }

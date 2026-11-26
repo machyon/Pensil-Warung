@@ -13,7 +13,8 @@ use super::plan::{Plan, ProductRef, Step};
 use crate::common::money::line_total;
 use crate::error::{AppError, AppResult, ErrorCode};
 use crate::products::{self, NewProduct};
-use crate::transactions::dto::{ItemResponse, TransactionResponse};
+use crate::transactions::dto::TransactionResponse;
+use crate::transactions::{TRANSACTION_COLUMNS, with_items};
 
 /// Inserts the transaction row. `None` means the user already has one with this
 /// `client_uuid` (a concurrent duplicate won): the caller replays it.
@@ -87,23 +88,14 @@ pub async fn find_by_client_uuid(
 ) -> AppResult<Option<TransactionResponse>> {
     let Some(row) = client
         .query_opt(
-            "SELECT id, raw_text, total, status::text AS status, occurred_at, voided_at, void_reason
-               FROM transactions WHERE user_id = $1 AND client_uuid = $2",
+            &format!("SELECT {TRANSACTION_COLUMNS} FROM transactions WHERE user_id = $1 AND client_uuid = $2"),
             &[&user_id, &client_uuid],
         )
         .await?
     else {
         return Ok(None);
     };
-    let items = client
-        .query(
-            "SELECT id, line_no, product_id, product_name, unit_price, quantity, line_total
-               FROM transaction_items WHERE transaction_id = $1 ORDER BY line_no",
-            &[&row.get::<_, i64>("id")],
-        )
-        .await?;
-    let items = items.iter().map(ItemResponse::from).collect();
-    Ok(Some(TransactionResponse::new(&row, items)))
+    Ok(Some(with_items(client, &row).await?))
 }
 
 /// The user's products among `ids` with their current stock, ordered by id.
