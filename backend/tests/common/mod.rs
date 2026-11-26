@@ -139,6 +139,48 @@ impl TestApp {
         self.request(Method::DELETE, path, token, body).await
     }
 
+    /// Registers a password user through the API and returns its token.
+    pub async fn register(&self, display_name: &str, email: &str, password: &str) -> String {
+        let res = self
+            .post_json(
+                "/api/v1/auth/register",
+                None,
+                &serde_json::json!({"display_name": display_name, "email": email, "password": password}),
+            )
+            .await;
+        assert_eq!(res.status, StatusCode::CREATED, "{}", res.text);
+        res.json["token"].as_str().expect("token").to_owned()
+    }
+
+    /// Inserts a Google-only user (no password identity) directly and returns its token.
+    pub async fn google_user(&self, display_name: &str, email: &str) -> String {
+        let client = self.client().await;
+        let id: Uuid = client
+            .query_one(
+                "INSERT INTO users (email, display_name) VALUES ($1, $2) RETURNING id",
+                &[&email, &display_name],
+            )
+            .await
+            .expect("insert user")
+            .get(0);
+        client
+            .execute(
+                "INSERT INTO auth_identities (user_id, provider, provider_user_id)
+                 VALUES ($1, 'google', $2)",
+                &[&id, &format!("sub-{id}")],
+            )
+            .await
+            .expect("insert google identity");
+        backend::auth::jwt::issue_token(
+            &self.config.jwt_secret,
+            id,
+            1,
+            0,
+            self.config.jwt_expires_in,
+        )
+        .expect("token")
+    }
+
     /// Sends one request through the router. A JSON `body` sets the content type.
     pub async fn request(
         &self,

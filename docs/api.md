@@ -8,7 +8,7 @@ Reference for the HTTP API as it is built. It grows as branches merge. Only what
 |---|---|
 | Base path | `/api/v1`. The only route outside it is `GET /health` |
 | Format | JSON only. Request bodies need `Content-Type: application/json` |
-| Auth | Bearer token: `Authorization: Bearer <jwt>`. Get one from the auth endpoints below. It is an HS256 JWT valid for 7 days (`JWT_EXPIRES_IN`), and there is no refresh token: log in again after it expires. A missing, bad or expired token gives `401 unauthorized`. No route requires it yet |
+| Auth | Bearer token: `Authorization: Bearer <jwt>`. Get one from the auth endpoints below. It is an HS256 JWT valid for 7 days (`JWT_EXPIRES_IN`), and there is no refresh token: log in again after it expires. A missing, bad, expired or revoked token gives `401 unauthorized`. Changing the email or password revokes every token the user holds, on all devices, including the one that made the change; the client must log in again. Each request costs one primary-key lookup to check this. The `/me` routes require it |
 | Times | RFC 3339 strings, for example `2026-11-26T08:00:00Z` |
 | Money | Whole rupiah as JSON integers, for example `15000` for Rp15.000. No decimals |
 | Body limit | 64 KB by default. A route can set a higher limit |
@@ -47,19 +47,19 @@ The default status and message come from `backend/src/error.rs`. "Used" says whe
 | `invalid_body` | 400 | Isi permintaan tidak valid. | now | Malformed JSON, wrong shape, or missing JSON content type |
 | `invalid_query` | 400 | Parameter permintaan tidak valid. | now | A query string value does not parse |
 | `invalid_path` | 400 | Alamat permintaan tidak valid. | now | A path parameter does not parse |
-| `invalid_value` | 422 | Nilai yang dimasukkan tidak valid. | now | A field fails a rule (register: email format, password length, field too long). A database check failure (other than stock) gives 422. An unknown unique index gives 409 with this code |
-| `invalid_name` | 422 | Nama yang dimasukkan tidak valid. | later | A name fails the name rules |
+| `invalid_value` | 422 | Nilai yang dimasukkan tidak valid. | now | A field fails a rule (email format, username format, password length, field too long, missing `current_password`). A database check failure (other than stock) gives 422. An unknown unique index gives 409 with this code |
+| `invalid_name` | 422 | Nama yang dimasukkan tidak valid. | now | `PATCH /me/display-name`: empty after cleaning, or over 50 characters |
 | `not_found` | 404 | Data tidak ditemukan. | now | Unknown route, or the record does not exist |
 | `unauthorized` | 401 | Sesi Anda telah berakhir. Silakan masuk kembali. | now | Missing or invalid bearer token. `POST /auth/google` also returns it for a bad Google ID token, with the message "Token Google tidak valid." |
-| `invalid_credentials` | 401 | Email atau kata sandi salah. | now | Wrong email or password at login |
+| `invalid_credentials` | 401 | Email atau kata sandi salah. | now | Wrong email or password at login. Also a wrong `current_password` on the `/me` routes (message "Kata sandi saat ini salah.") |
 | `forbidden` | 403 | Anda tidak memiliki akses untuk tindakan ini. | later | Signed in, but not allowed (for example, not a broadcaster) |
 | `account_gone` | 401 | Akun tidak ditemukan. Silakan masuk kembali. | now | The user no longer exists. A foreign key violation (SQLSTATE 23503) maps here |
-| `email_taken` | 409 | Email sudah digunakan. | now | Unique violation on `users.email` (register with an existing email) |
-| `username_taken` | 409 | Username sudah digunakan. | SQL map | (Register and Google sign-up retry once before this can surface.) Unique violation on `users.username` |
+| `email_taken` | 409 | Email sudah digunakan. | now | Unique violation on `users.email` (register or `PATCH /me/email` with an existing email) |
+| `username_taken` | 409 | Username sudah digunakan. | now | Unique violation on `users.username` (`PATCH /me/username`). Register and Google sign-up retry once before this can surface |
 | `name_taken` | 409 | Nama produk sudah digunakan. | SQL map | Unique violation on a product name for this user |
 | `email_registered` | 409 | Email ini sudah terdaftar. Silakan masuk dengan kata sandi. | now | Google sign-in with an email that already has a password account |
-| `google_account` | 403 | Akun ini masuk dengan Google, sehingga tidak dapat diubah di sini. | later | Password or email change on a Google-only account |
-| `reauth_required` | 401 | Silakan verifikasi ulang akun Anda untuk melanjutkan. | later | A sensitive action needs a fresh sign-in, such as account deletion |
+| `google_account` | 403 | Akun ini masuk dengan Google, sehingga tidak dapat diubah di sini. | now | Email or password change on a Google-only account |
+| `reauth_required` | 401 | Silakan verifikasi ulang akun Anda untuk melanjutkan. | now | `DELETE /me` for a Google-only account without a fresh matching Google ID token |
 | `stock_insufficient` | 422 | Stok tidak cukup. | SQL map | A sale would take stock below zero |
 | `not_editable` | 409 | Data ini tidak dapat diubah. | later | The record cannot be changed in its current state |
 | `time_passed` | 422 | Waktu untuk tindakan ini sudah lewat. | later | The time window for an action has passed |
@@ -150,3 +150,70 @@ The `user` object:
 - A known Google account logs in: `200 OK` with `{ "token": "<jwt>", "user": { ... }, "created": false }`.
 - A new Google account and a new email creates the user (display name from the Google name): `201 Created` with `"created": true`.
 - Errors: `unauthorized` (401, bad Google token), `email_registered` (409, the email already has an account. Accounts are never linked automatically).
+
+## Account
+
+All `/me` routes need a bearer token (any role). The `PATCH` routes return the updated `user` object (same shape as under Auth). If the user no longer exists, they return `401 account_gone`.
+
+### GET /api/v1/me
+
+`200 OK` with the `user` object.
+
+### PATCH /api/v1/me/username
+
+```json
+{ "username": "warung_siti" }
+```
+
+- Must match `^[a-z0-9_]{3,30}$`.
+- Errors: `invalid_value` (422), `username_taken` (409).
+
+### PATCH /api/v1/me/display-name
+
+```json
+{ "display_name": "Warung Siti" }
+```
+
+- Cleaned like at register (letters, digits and spaces). The result must be 1 to 50 characters. The username does not change. At most 100 characters before cleaning.
+- Errors: `invalid_name` (422), `invalid_value` (422, too long).
+
+### PATCH /api/v1/me/email
+
+```json
+{ "email": "baru@example.com", "current_password": "rahasia123" }
+```
+
+- The email is trimmed and lowercased. There is no verification email.
+- On success all of the user's tokens stop working, including the one used for this call: the next request gets `401 unauthorized`, so the client must log in again with the new email. The response is still `200` with the updated user.
+- Errors: `invalid_value` (422), `invalid_credentials` (401, wrong password), `google_account` (403, Google-only account), `email_taken` (409).
+
+### PUT /api/v1/me/password
+
+```json
+{ "current_password": "rahasia123", "new_password": "rahasia456" }
+```
+
+- `new_password` is 8 to 128 characters. `204 No Content`.
+- On success all of the user's tokens stop working, including the one used for this call: the client must log in again with the new password.
+- The `details.field` of a length error is `new_password`.
+- Errors: `invalid_value` (422), `invalid_credentials` (401), `google_account` (403).
+
+### DELETE /api/v1/me
+
+Deletes the account and all of the warung's data. Broadcasts the user created stay, with `created_by` set to null. `204 No Content`.
+
+Users with a password send:
+
+```json
+{ "current_password": "rahasia123" }
+```
+
+Google-only users send a Google ID token from a fresh sign-in:
+
+```json
+{ "id_token": "<Google ID token>" }
+```
+
+- The token must pass the same checks as `POST /auth/google`, its `sub` must be this user's Google identity, and its `iat` must be at most 5 minutes old (a small clock skew into the future is allowed).
+- Errors: `invalid_credentials` (401, wrong password), `invalid_value` (422, password user without `current_password`), `reauth_required` (401, Google-only user with a missing, stale, invalid or mismatched token).
+- An old JWT of a deleted user still decodes: later `/me` calls return `401 account_gone`.

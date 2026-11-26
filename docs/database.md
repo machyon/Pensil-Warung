@@ -20,7 +20,7 @@ Mobile sales notebook for small Indonesian warung owners (UI text is Indonesian)
 
 ## Tables
 - `roles`, `permissions`, `role_permission`: plain id + name. Seeded: role 1 = user, 2 = broadcaster. `users.role_id` defaults to 1.
-- `users`: `email`, `display_name`, `username`, `role_id`.
+- `users`: `email`, `display_name`, `username`, `role_id`, `token_version` (starts at 0, bumped on email or password change; a JWT whose `ver` differs is rejected).
 - `auth_identities`: one row per login method per user.
 - `products`: name (unique per user, case-insensitive), price, stock, optional photo (`photo_key`, a Tigris object key; the API returns presigned URLs).
 - `transactions`: one "Simpan" = one transaction. Holds `raw_text`, `total`, `status` (completed or voided).

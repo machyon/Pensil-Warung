@@ -1,4 +1,5 @@
-//! HS256 access tokens. Claims: `sub` (user id), `role` (role id), `iat`, `exp`.
+//! HS256 access tokens. Claims: `sub` (user id), `role` (role id), `ver` (the user's
+//! `token_version` at issue time), `iat`, `exp`.
 
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use serde::{Deserialize, Serialize};
@@ -11,6 +12,7 @@ use crate::error::AppError;
 pub struct Claims {
     pub sub: Uuid,
     pub role: i32,
+    pub ver: i32,
     pub iat: i64,
     pub exp: i64,
 }
@@ -20,12 +22,14 @@ pub fn issue_token(
     secret: &str,
     user_id: Uuid,
     role_id: i32,
+    version: i32,
     expires_in: Duration,
 ) -> Result<String, AppError> {
     let now = OffsetDateTime::now_utc();
     let claims = Claims {
         sub: user_id,
         role: role_id,
+        ver: version,
         iat: now.unix_timestamp(),
         exp: (now + expires_in).unix_timestamp(),
     };
@@ -57,15 +61,15 @@ mod tests {
     #[test]
     fn roundtrip() {
         let id = Uuid::new_v4();
-        let token = issue_token(SECRET, id, 2, Duration::days(7)).unwrap();
+        let token = issue_token(SECRET, id, 2, 5, Duration::days(7)).unwrap();
         let claims = verify_token(SECRET, &token).unwrap();
-        assert_eq!((claims.sub, claims.role), (id, 2));
+        assert_eq!((claims.sub, claims.role, claims.ver), (id, 2, 5));
         assert_eq!(claims.exp - claims.iat, 7 * 24 * 3600);
     }
 
     #[test]
     fn expired_token_is_unauthorized() {
-        let token = issue_token(SECRET, Uuid::new_v4(), 1, Duration::seconds(-10)).unwrap();
+        let token = issue_token(SECRET, Uuid::new_v4(), 1, 0, Duration::seconds(-10)).unwrap();
         assert_eq!(
             verify_token(SECRET, &token).unwrap_err().code(),
             crate::error::ErrorCode::Unauthorized
@@ -74,7 +78,7 @@ mod tests {
 
     #[test]
     fn tampered_wrong_key_and_garbage_are_unauthorized() {
-        let token = issue_token(SECRET, Uuid::new_v4(), 1, Duration::days(1)).unwrap();
+        let token = issue_token(SECRET, Uuid::new_v4(), 1, 0, Duration::days(1)).unwrap();
         let mut parts: Vec<&str> = token.split('.').collect();
         parts[2] = "AAAA";
         assert!(verify_token(SECRET, &parts.join(".")).is_err());
