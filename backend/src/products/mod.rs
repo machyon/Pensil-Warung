@@ -19,13 +19,14 @@ use crate::common::names::{name_key, normalize_product_name};
 use crate::common::validate::{max_len, non_negative_money};
 use crate::error::{AppError, AppResult, ErrorCode};
 
-const COLUMNS: &str = "id, name, price, stock, created_at, updated_at";
+const COLUMNS: &str = "id, name, price, stock, photo_key, created_at, updated_at";
 
 pub struct Product {
     pub id: i64,
     pub name: String,
     pub price: i64,
     pub stock: Decimal,
+    pub photo_key: Option<String>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
 }
@@ -37,6 +38,7 @@ impl From<&Row> for Product {
             name: row.get("name"),
             price: row.get("price"),
             stock: row.get("stock"),
+            photo_key: row.get("photo_key"),
             created_at: row.get("created_at"),
             updated_at: row.get("updated_at"),
         }

@@ -10,7 +10,7 @@ use serde_json::json;
 use std::collections::HashSet;
 use uuid::Uuid;
 
-use super::dto::ProductResponse;
+use super::dto::{ProductResponse, respond, respond_one};
 use super::{
     NewProduct, ProductPatch, clear_photo_key, create, delete, get as get_product, list, photo,
     set_photo_key, update,
@@ -60,11 +60,8 @@ async fn list_products(
 ) -> Result<Json<ListResponse>, AppError> {
     state.perms.require(&user, Perm::ProductManage)?;
     let client = state.pool.get().await?;
-    let items: Vec<ProductResponse> = list(&**client, user.id, query.q.as_deref())
-        .await?
-        .into_iter()
-        .map(Into::into)
-        .collect();
+    let products = list(&**client, user.id, query.q.as_deref()).await?;
+    let items = respond(&state, products).await;
     Ok(Json(ListResponse {
         count: items.len(),
         items,
@@ -78,7 +75,8 @@ async fn get_one(
 ) -> Result<Json<ProductResponse>, AppError> {
     state.perms.require(&user, Perm::ProductManage)?;
     let client = state.pool.get().await?;
-    Ok(Json(get_product(&**client, user.id, id).await?.into()))
+    let product = get_product(&**client, user.id, id).await?;
+    Ok(Json(respond_one(&state, product).await))
 }
 
 /// All fields optional. `stock` is the new absolute stock (an integer).
@@ -104,9 +102,8 @@ async fn patch_one(
         body.note.as_deref(),
     )?;
     let mut client = state.pool.get().await?;
-    Ok(Json(
-        update(&mut **client, user.id, id, &patch).await?.into(),
-    ))
+    let product = update(&mut **client, user.id, id, &patch).await?;
+    Ok(Json(respond_one(&state, product).await))
 }
 
 /// Hard delete: movements go with it, sale items keep their snapshots.
@@ -146,7 +143,8 @@ async fn create_one(
     state.perms.require(&user, Perm::ProductManage)?;
     let new = body.validate()?;
     let client = state.pool.get().await?;
-    Ok(Created(create(&**client, user.id, &new).await?.into()))
+    let product = create(&**client, user.id, &new).await?;
+    Ok(Created(respond_one(&state, product).await))
 }
 
 #[derive(Deserialize)]
@@ -187,15 +185,16 @@ async fn create_bulk(
     }
     let mut client = state.pool.get().await?;
     let tx = client.transaction().await?;
-    let mut items = Vec::with_capacity(new.len());
+    let mut products = Vec::with_capacity(new.len());
     for (index, item) in new.iter().enumerate() {
         match create(&*tx, user.id, item).await {
-            Ok(p) => items.push(p.into()),
+            Ok(p) => products.push(p),
             Err(e) if e.code() == ErrorCode::NameTaken => return Err(name_taken(index)),
             Err(e) => return Err(e),
         }
     }
     tx.commit().await?;
+    let items = respond(&state, products).await;
     Ok(Created(BulkResponse { items }))
 }
 
@@ -264,7 +263,8 @@ async fn put_photo(
         }
     };
     photo::delete_object(&state.storage, old).await;
-    Ok(Json(get_product(&**client, user.id, id).await?.into()))
+    let product = get_product(&**client, user.id, id).await?;
+    Ok(Json(respond_one(&state, product).await))
 }
 
 /// Removes the product's photo. Idempotent: 204 even when there was none.
