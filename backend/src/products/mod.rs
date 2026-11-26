@@ -8,6 +8,7 @@
 
 pub mod dto;
 pub mod handlers;
+pub mod photo;
 
 use rust_decimal::Decimal;
 use time::OffsetDateTime;

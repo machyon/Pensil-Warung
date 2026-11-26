@@ -36,6 +36,7 @@ pub enum ErrorCode {
     NotEditable,
     TimePassed,
     PayloadTooLarge,
+    UnsupportedImage,
     DbUnavailable,
     Internal,
 }
@@ -65,6 +66,7 @@ impl ErrorCode {
             ErrorCode::NotEditable => "not_editable",
             ErrorCode::TimePassed => "time_passed",
             ErrorCode::PayloadTooLarge => "payload_too_large",
+            ErrorCode::UnsupportedImage => "unsupported_image",
             ErrorCode::DbUnavailable => "db_unavailable",
             ErrorCode::Internal => "internal",
         }
@@ -130,6 +132,10 @@ impl ErrorCode {
             ErrorCode::PayloadTooLarge => (
                 StatusCode::PAYLOAD_TOO_LARGE,
                 "Ukuran berkas terlalu besar.",
+            ),
+            ErrorCode::UnsupportedImage => (
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                "Foto harus berformat JPEG, PNG, atau WebP.",
             ),
             ErrorCode::DbUnavailable => (
                 StatusCode::SERVICE_UNAVAILABLE,
@@ -277,7 +283,7 @@ mod tests {
     use super::*;
     use axum::body::to_bytes;
 
-    const ALL: [ErrorCode; 23] = [
+    const ALL: [ErrorCode; 24] = [
         ErrorCode::InvalidBody,
         ErrorCode::InvalidQuery,
         ErrorCode::InvalidPath,
@@ -299,6 +305,7 @@ mod tests {
         ErrorCode::NotEditable,
         ErrorCode::TimePassed,
         ErrorCode::PayloadTooLarge,
+        ErrorCode::UnsupportedImage,
         ErrorCode::DbUnavailable,
         ErrorCode::Internal,
     ];
