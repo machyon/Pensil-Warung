@@ -8,7 +8,7 @@ Reference for the HTTP API as it is built. It grows as branches merge. Only what
 |---|---|
 | Base path | `/api/v1`. The only route outside it is `GET /health` |
 | Format | JSON only. Request bodies need `Content-Type: application/json` |
-| Auth | Bearer token: `Authorization: Bearer <jwt>`. Get one from the auth endpoints below. It is an HS256 JWT valid for 7 days (`JWT_EXPIRES_IN`), and there is no refresh token: log in again after it expires. A missing, bad or expired token gives `401 unauthorized`. The `/me` routes require it |
+| Auth | Bearer token: `Authorization: Bearer <jwt>`. Get one from the auth endpoints below. It is an HS256 JWT valid for 7 days (`JWT_EXPIRES_IN`), and there is no refresh token: log in again after it expires. A missing, bad, expired or revoked token gives `401 unauthorized`. Changing the email or password revokes every token the user holds, on all devices, including the one that made the change; the client must log in again. Each request costs one primary-key lookup to check this. The `/me` routes require it |
 | Times | RFC 3339 strings, for example `2026-11-26T08:00:00Z` |
 | Money | Whole rupiah as JSON integers, for example `15000` for Rp15.000. No decimals |
 | Body limit | 64 KB by default. A route can set a higher limit |
@@ -184,6 +184,7 @@ All `/me` routes need a bearer token (any role). The `PATCH` routes return the u
 ```
 
 - The email is trimmed and lowercased. There is no verification email.
+- On success all of the user's tokens stop working, including the one used for this call: the next request gets `401 unauthorized`, so the client must log in again with the new email. The response is still `200` with the updated user.
 - Errors: `invalid_value` (422), `invalid_credentials` (401, wrong password), `google_account` (403, Google-only account), `email_taken` (409).
 
 ### PUT /api/v1/me/password
@@ -192,7 +193,9 @@ All `/me` routes need a bearer token (any role). The `PATCH` routes return the u
 { "current_password": "rahasia123", "new_password": "rahasia456" }
 ```
 
-- `new_password` is 8 to 128 characters. `204 No Content`. Existing tokens stay valid.
+- `new_password` is 8 to 128 characters. `204 No Content`.
+- On success all of the user's tokens stop working, including the one used for this call: the client must log in again with the new password.
+- The `details.field` of a length error is `new_password`.
 - Errors: `invalid_value` (422), `invalid_credentials` (401), `google_account` (403).
 
 ### DELETE /api/v1/me
