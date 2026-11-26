@@ -8,7 +8,7 @@ Reference for the HTTP API as it is built. It grows as branches merge. Only what
 |---|---|
 | Base path | `/api/v1`. The only route outside it is `GET /health` |
 | Format | JSON only. Request bodies need `Content-Type: application/json` |
-| Auth | Bearer token: `Authorization: Bearer <jwt>`. Not built yet, it comes with the auth branch |
+| Auth | Bearer token: `Authorization: Bearer <jwt>`. Get one from the auth endpoints below. It is an HS256 JWT valid for 7 days (`JWT_EXPIRES_IN`), and there is no refresh token: log in again after it expires. A missing, bad or expired token gives `401 unauthorized`. No route requires it yet |
 | Times | RFC 3339 strings, for example `2026-11-26T08:00:00Z` |
 | Money | Whole rupiah as JSON integers, for example `15000` for Rp15.000. No decimals |
 | Body limit | 64 KB by default. A route can set a higher limit |
@@ -47,17 +47,17 @@ The default status and message come from `backend/src/error.rs`. "Used" says whe
 | `invalid_body` | 400 | Isi permintaan tidak valid. | now | Malformed JSON, wrong shape, or missing JSON content type |
 | `invalid_query` | 400 | Parameter permintaan tidak valid. | now | A query string value does not parse |
 | `invalid_path` | 400 | Alamat permintaan tidak valid. | now | A path parameter does not parse |
-| `invalid_value` | 422 | Nilai yang dimasukkan tidak valid. | SQL map | A field fails a rule. A database check failure (other than stock) gives 422. An unknown unique index gives 409 with this code |
+| `invalid_value` | 422 | Nilai yang dimasukkan tidak valid. | now | A field fails a rule (register: email format, password length, field too long). A database check failure (other than stock) gives 422. An unknown unique index gives 409 with this code |
 | `invalid_name` | 422 | Nama yang dimasukkan tidak valid. | later | A name fails the name rules |
 | `not_found` | 404 | Data tidak ditemukan. | now | Unknown route, or the record does not exist |
-| `unauthorized` | 401 | Sesi Anda telah berakhir. Silakan masuk kembali. | later | Missing or invalid bearer token |
-| `invalid_credentials` | 401 | Email atau kata sandi salah. | later | Wrong email or password at login |
+| `unauthorized` | 401 | Sesi Anda telah berakhir. Silakan masuk kembali. | now | Missing or invalid bearer token. `POST /auth/google` also returns it for a bad Google ID token, with the message "Token Google tidak valid." |
+| `invalid_credentials` | 401 | Email atau kata sandi salah. | now | Wrong email or password at login |
 | `forbidden` | 403 | Anda tidak memiliki akses untuk tindakan ini. | later | Signed in, but not allowed (for example, not a broadcaster) |
-| `account_gone` | 401 | Akun tidak ditemukan. Silakan masuk kembali. | SQL map | The user no longer exists. A foreign key violation (SQLSTATE 23503) maps here |
-| `email_taken` | 409 | Email sudah digunakan. | SQL map | Unique violation on `users.email` |
-| `username_taken` | 409 | Username sudah digunakan. | SQL map | Unique violation on `users.username` |
+| `account_gone` | 401 | Akun tidak ditemukan. Silakan masuk kembali. | now | The user no longer exists. A foreign key violation (SQLSTATE 23503) maps here |
+| `email_taken` | 409 | Email sudah digunakan. | now | Unique violation on `users.email` (register with an existing email) |
+| `username_taken` | 409 | Username sudah digunakan. | SQL map | (Register and Google sign-up retry once before this can surface.) Unique violation on `users.username` |
 | `name_taken` | 409 | Nama produk sudah digunakan. | SQL map | Unique violation on a product name for this user |
-| `email_registered` | 409 | Email ini sudah terdaftar. Silakan masuk dengan kata sandi. | later | Google sign-in with an email that already has a password account |
+| `email_registered` | 409 | Email ini sudah terdaftar. Silakan masuk dengan kata sandi. | now | Google sign-in with an email that already has a password account |
 | `google_account` | 403 | Akun ini masuk dengan Google, sehingga tidak dapat diubah di sini. | later | Password or email change on a Google-only account |
 | `reauth_required` | 401 | Silakan verifikasi ulang akun Anda untuk melanjutkan. | later | A sensitive action needs a fresh sign-in, such as account deletion |
 | `stock_insufficient` | 422 | Stok tidak cukup. | SQL map | A sale would take stock below zero |
@@ -104,3 +104,49 @@ Readiness check. Runs `SELECT 1` on the database. No auth.
   }
 }
 ```
+
+## Auth
+
+All three endpoints return a `token` (see Conventions) and the `user` object. They need no bearer token.
+
+The `user` object:
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | string (uuid) | |
+| `display_name` | string | Letters, digits and spaces only. A blank name becomes `user <n>` |
+| `username` | string | Generated from the display name, for example `siti_rahayu`, then `siti_rahayu_1` |
+| `email` | string | Lowercase |
+| `role` | string | `user` or `broadcaster` |
+| `permissions` | string[] | Permissions of the role |
+| `has_password` | boolean | `false` for a Google-only account |
+
+### POST /api/v1/auth/register
+
+```json
+{ "display_name": "Siti Rahayu", "email": "siti@example.com", "password": "rahasia123" }
+```
+
+- The email is trimmed and lowercased. The password is 8 to 128 characters. `display_name` is at most 100 characters before cleaning.
+- `201 Created` with `{ "token": "<jwt>", "user": { ... } }`.
+- Errors: `invalid_value` (422, with `details.field`), `email_taken` (409).
+
+### POST /api/v1/auth/login
+
+```json
+{ "email": "siti@example.com", "password": "rahasia123" }
+```
+
+- `200 OK` with `{ "token": "<jwt>", "user": { ... } }`.
+- Errors: `invalid_credentials` (401). A wrong password, an unknown email and a Google-only account all give the same response.
+
+### POST /api/v1/auth/google
+
+```json
+{ "id_token": "<Google ID token>" }
+```
+
+- The token must be signed by Google, have `aud` in `GOOGLE_CLIENT_IDS`, an accepted `iss`, not be expired, and have a verified email.
+- A known Google account logs in: `200 OK` with `{ "token": "<jwt>", "user": { ... }, "created": false }`.
+- A new Google account and a new email creates the user (display name from the Google name): `201 Created` with `"created": true`.
+- Errors: `unauthorized` (401, bad Google token), `email_registered` (409, the email already has an account. Accounts are never linked automatically).

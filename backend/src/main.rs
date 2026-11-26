@@ -4,6 +4,7 @@ use std::sync::Arc;
 use clap::{Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
 
+use backend::auth::perms::Permissions;
 use backend::config::{AppEnv, Config};
 use backend::state::AppState;
 use backend::{db, routes};
@@ -91,9 +92,12 @@ async fn migrate(config: &Config) -> Result<(), AnyError> {
 async fn serve(config: Config) -> Result<(), AnyError> {
     let pool = db::create_pool(&config)?;
     let port = config.port;
+    let perms = Arc::new(Permissions::load(&pool).await?);
     let state = AppState {
         pool,
         config: Arc::new(config),
+        perms,
+        google_keys: Arc::default(),
     };
     let app = routes::router(state);
 
