@@ -89,8 +89,18 @@ async fn move_stock_find_by_name_and_delete() {
             .is_none()
     );
 
-    assert!(!products::delete(&**client, budi, p.id).await.unwrap());
-    assert!(products::delete(&**client, siti, p.id).await.unwrap());
+    assert!(
+        products::delete(&**client, budi, p.id)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        products::delete(&**client, siti, p.id)
+            .await
+            .unwrap()
+            .is_some()
+    );
     assert!(movements(&app, p.id).await.is_empty());
 }
 

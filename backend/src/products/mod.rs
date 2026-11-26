@@ -176,15 +176,39 @@ pub async fn update(
 }
 
 /// Deletes one of the user's products (movements cascade, sale snapshots stay).
-/// Returns false when there is no such product.
-pub async fn delete(client: &impl GenericClient, user_id: Uuid, id: i64) -> AppResult<bool> {
-    let n = client
-        .execute(
-            "DELETE FROM products WHERE id = $1 AND user_id = $2",
+/// Returns the deleted row's photo key: `None` when there is no such product,
+/// `Some(None)` when it had no photo. After commit, pass the key to
+/// `photo::delete_object`.
+pub async fn delete(
+    client: &impl GenericClient,
+    user_id: Uuid,
+    id: i64,
+) -> AppResult<Option<Option<String>>> {
+    let row = client
+        .query_opt(
+            "DELETE FROM products WHERE id = $1 AND user_id = $2 RETURNING photo_key",
             &[&id, &user_id],
         )
         .await?;
-    Ok(n > 0)
+    Ok(row.map(|r| r.get(0)))
+}
+
+/// Clears the user's product photo and returns the previous key, with the same
+/// `None` / `Some(None)` meaning as `delete`.
+pub async fn clear_photo_key(
+    client: &impl GenericClient,
+    user_id: Uuid,
+    id: i64,
+) -> AppResult<Option<Option<String>>> {
+    let row = client
+        .query_opt(
+            "UPDATE products p SET photo_key = NULL FROM
+               (SELECT photo_key FROM products WHERE id = $1 AND user_id = $2 FOR UPDATE) old
+             WHERE p.id = $1 AND p.user_id = $2 RETURNING old.photo_key",
+            &[&id, &user_id],
+        )
+        .await?;
+    Ok(row.map(|r| r.get(0)))
 }
 
 /// Points the user's product at a new photo object and returns the previous

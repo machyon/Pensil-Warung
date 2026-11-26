@@ -1,11 +1,13 @@
 //! Photo validation and resizing: any jpeg/png/webp in, a small JPEG out.
 
 use std::io::Cursor;
+use std::sync::Arc;
 
 use image::imageops::FilterType;
 use image::{DynamicImage, ImageDecoder, ImageFormat, ImageReader, Limits, Rgb, RgbImage};
 
 use crate::error::{AppError, AppResult, ErrorCode};
+use crate::storage::Storage;
 
 /// Longest side of a stored photo, in pixels.
 const MAX_SIDE: u32 = 512;
@@ -15,6 +17,16 @@ const MAX_INPUT_SIDE: u32 = 8000;
 const MAX_ALLOC_BYTES: u64 = 256 * 1024 * 1024;
 
 pub const CONTENT_TYPE: &str = "image/jpeg";
+
+/// Deletes a photo object after the DB change committed. Best effort: a failure
+/// is logged, never returned. Does nothing without storage or without a key.
+pub async fn delete_object(storage: &Option<Arc<dyn Storage>>, key: Option<String>) {
+    if let (Some(storage), Some(key)) = (storage, key)
+        && let Err(e) = storage.delete(&key).await
+    {
+        tracing::warn!(error = %e, key, "could not delete photo object");
+    }
+}
 
 fn unsupported() -> AppError {
     AppError::new(ErrorCode::UnsupportedImage)

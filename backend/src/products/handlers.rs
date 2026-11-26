@@ -12,8 +12,8 @@ use uuid::Uuid;
 
 use super::dto::ProductResponse;
 use super::{
-    NewProduct, ProductPatch, create, delete, get as get_product, list, photo, set_photo_key,
-    update,
+    NewProduct, ProductPatch, clear_photo_key, create, delete, get as get_product, list, photo,
+    set_photo_key, update,
 };
 use crate::auth::extractor::AuthUser;
 use crate::auth::perms::Perm;
@@ -36,7 +36,9 @@ pub fn routes() -> Router<AppState> {
         )
         .route(
             "/products/{id}/photo",
-            put(put_photo).layer(DefaultBodyLimit::max(PHOTO_MAX_BYTES)),
+            put(put_photo)
+                .delete(delete_photo)
+                .layer(DefaultBodyLimit::max(PHOTO_MAX_BYTES)),
         )
 }
 
@@ -115,10 +117,10 @@ async fn delete_one(
 ) -> Result<NoContent, AppError> {
     state.perms.require(&user, Perm::ProductManage)?;
     let client = state.pool.get().await?;
-    if !delete(&**client, user.id, id).await? {
-        return Err(AppError::not_found());
-    }
-    // TODO(branch 05): delete the product's photo object.
+    let key = delete(&**client, user.id, id)
+        .await?
+        .ok_or_else(AppError::not_found)?;
+    photo::delete_object(&state.storage, key).await;
     Ok(NoContent)
 }
 
@@ -261,10 +263,24 @@ async fn put_photo(
             return Err(failed.err().unwrap_or_else(AppError::not_found));
         }
     };
-    if let Some(old) = old
-        && let Err(e) = storage.delete(&old).await
-    {
-        tracing::warn!(error = %e, key = old, "could not delete replaced photo");
-    }
+    photo::delete_object(&state.storage, old).await;
     Ok(Json(get_product(&**client, user.id, id).await?.into()))
+}
+
+/// Removes the product's photo. Idempotent: 204 even when there was none.
+async fn delete_photo(
+    State(state): State<AppState>,
+    user: AuthUser,
+    ApiPath(id): ApiPath<i64>,
+) -> Result<NoContent, AppError> {
+    state.perms.require(&user, Perm::ProductManage)?;
+    if state.storage.is_none() {
+        return Err(AppError::new(ErrorCode::StorageUnavailable));
+    }
+    let client = state.pool.get().await?;
+    let key = clear_photo_key(&**client, user.id, id)
+        .await?
+        .ok_or_else(AppError::not_found)?;
+    photo::delete_object(&state.storage, key).await;
+    Ok(NoContent)
 }
