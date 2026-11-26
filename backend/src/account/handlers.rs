@@ -2,9 +2,11 @@
 //! The PATCH routes return the updated user, the same shape as `GET /me`.
 
 use axum::extract::State;
+use axum::http::StatusCode;
 use axum::routing::{get, patch, put};
 use axum::{Json, Router};
 use serde::Deserialize;
+use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::auth::extractor::AuthUser;
@@ -20,7 +22,7 @@ use crate::state::AppState;
 
 pub fn routes() -> Router<AppState> {
     Router::new()
-        .route("/me", get(me))
+        .route("/me", get(me).delete(delete_me))
         .route("/me/username", patch(set_username))
         .route("/me/display-name", patch(set_display_name))
         .route("/me/email", patch(set_email))
@@ -192,6 +194,84 @@ async fn set_password(
               WHERE user_id = $2 AND provider = 'password'",
             &[&hash, &user.id],
         )
+        .await?;
+    Ok(NoContent)
+}
+
+/// A Google token older than this (or issued this far in the future) is not a fresh sign-in.
+const REAUTH_WINDOW_SECS: i64 = 300;
+const REAUTH_SKEW_SECS: i64 = 60;
+
+#[derive(Deserialize)]
+struct DeleteBody {
+    current_password: Option<String>,
+    id_token: Option<String>,
+}
+
+fn reauth_required() -> AppError {
+    AppError::new(ErrorCode::ReauthRequired)
+}
+
+/// Password users confirm with `current_password`, Google-only users with a fresh `id_token`.
+/// The FK cascades remove the warung's data and the identities; broadcasts keep their rows.
+async fn delete_me(
+    State(state): State<AppState>,
+    user: AuthUser,
+    ApiJson(body): ApiJson<DeleteBody>,
+) -> Result<NoContent, AppError> {
+    let client = state.pool.get().await?;
+    let has_password = client
+        .query_opt(
+            "SELECT EXISTS (SELECT 1 FROM auth_identities
+                             WHERE user_id = u.id AND provider = 'password')
+               FROM users u WHERE u.id = $1",
+            &[&user.id],
+        )
+        .await?
+        .ok_or_else(|| AppError::new(ErrorCode::AccountGone))?
+        .get::<_, bool>(0);
+    if has_password {
+        let password = body.current_password.ok_or_else(|| {
+            AppError::validation(
+                ErrorCode::InvalidValue,
+                "current_password",
+                "Kata sandi saat ini wajib diisi.",
+            )
+        })?;
+        check_current_password(&client, user.id, password).await?;
+    } else {
+        let token = body.id_token.ok_or_else(reauth_required)?;
+        let claims = state
+            .google_keys
+            .verify(
+                &state.config.google_jwks_url,
+                &state.config.google_client_ids,
+                &token,
+            )
+            .await
+            .map_err(|e| {
+                if e.status() == StatusCode::UNAUTHORIZED {
+                    reauth_required()
+                } else {
+                    e
+                }
+            })?;
+        let age =
+            OffsetDateTime::now_utc().unix_timestamp() - claims.iat.ok_or_else(reauth_required)?;
+        let mine = client
+            .query_opt(
+                "SELECT 1 FROM auth_identities
+                  WHERE user_id = $1 AND provider = 'google' AND provider_user_id = $2",
+                &[&user.id, &claims.sub],
+            )
+            .await?
+            .is_some();
+        if !mine || !(-REAUTH_SKEW_SECS..=REAUTH_WINDOW_SECS).contains(&age) {
+            return Err(reauth_required());
+        }
+    }
+    client
+        .execute("DELETE FROM users WHERE id = $1", &[&user.id])
         .await?;
     Ok(NoContent)
 }

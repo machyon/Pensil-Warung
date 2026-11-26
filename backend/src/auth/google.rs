@@ -23,6 +23,8 @@ pub struct GoogleClaims {
     #[serde(default)]
     pub email_verified: bool,
     pub name: Option<String>,
+    /// Issued-at, unix seconds. Used to require a fresh sign-in for sensitive actions.
+    pub iat: Option<i64>,
 }
 
 #[derive(Default)]
