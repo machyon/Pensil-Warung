@@ -1,8 +1,9 @@
-//! `POST /auth/register` and `POST /auth/login`.
+//! `POST /auth/register`, `POST /auth/login` and `POST /auth/google`.
 
 use std::sync::LazyLock;
 
 use axum::extract::State;
+use axum::http::StatusCode;
 use axum::routing::post;
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
@@ -30,6 +31,7 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/auth/register", post(register))
         .route("/auth/login", post(login))
+        .route("/auth/google", post(google))
 }
 
 #[derive(Serialize)]
@@ -98,19 +100,18 @@ async fn hash_blocking(password: String) -> Result<String, AppError> {
         .map_err(|_| AppError::internal())?
 }
 
-async fn register(
-    State(state): State<AppState>,
-    ApiJson(body): ApiJson<RegisterBody>,
-) -> Result<Created<AuthResponse>, AppError> {
-    body.validate()?;
-    let email = normalize_email(&body.email)?;
-    let display_name = sanitize_display_name(&body.display_name);
-    let hash = hash_blocking(body.password).await?;
-
-    let mut client = state.pool.get().await?;
-    // The generated username can race with another signup: retry once on its unique key.
+/// Inserts a user and its login identity in one tx. The generated username can race
+/// with another signup, so the insert is retried once on its unique key.
+async fn create_user(
+    client: &mut deadpool_postgres::Client,
+    email: &str,
+    display_name: Option<&str>,
+    provider: &str,
+    provider_user_id: Option<&str>,
+    password_hash: Option<&str>,
+) -> Result<(Uuid, i32), AppError> {
     let mut attempt = 0;
-    let (id, role_id) = loop {
+    loop {
         attempt += 1;
         let tx = client.transaction().await?;
         let inserted = async {
@@ -123,9 +124,9 @@ async fn register(
                 .await?;
             let id: Uuid = row.get("id");
             tx.execute(
-                "INSERT INTO auth_identities (user_id, provider, password_hash)
-                 VALUES ($1, 'password', $2)",
-                &[&id, &hash],
+                "INSERT INTO auth_identities (user_id, provider, provider_user_id, password_hash)
+                 VALUES ($1, $2::text::auth_provider, $3, $4)",
+                &[&id, &provider, &provider_user_id, &password_hash],
             )
             .await?;
             Ok::<_, AppError>((id, row.get::<_, i32>("role_id")))
@@ -134,12 +135,33 @@ async fn register(
         match inserted {
             Ok(ids) => {
                 tx.commit().await?;
-                break ids;
+                return Ok(ids);
             }
             Err(err) if attempt < 2 && err.code() == ErrorCode::UsernameTaken => continue,
             Err(err) => return Err(err),
         }
-    };
+    }
+}
+
+async fn register(
+    State(state): State<AppState>,
+    ApiJson(body): ApiJson<RegisterBody>,
+) -> Result<Created<AuthResponse>, AppError> {
+    body.validate()?;
+    let email = normalize_email(&body.email)?;
+    let display_name = sanitize_display_name(&body.display_name);
+    let hash = hash_blocking(body.password).await?;
+
+    let mut client = state.pool.get().await?;
+    let (id, role_id) = create_user(
+        &mut client,
+        &email,
+        display_name.as_deref(),
+        "password",
+        None,
+        Some(&hash),
+    )
+    .await?;
 
     let user = load_user(&client, &state.perms, id).await?;
     let token = token_for(&state, id, role_id)?;
@@ -181,4 +203,80 @@ async fn login(
     let user = load_user(&client, &state.perms, id).await?;
     let token = token_for(&state, id, role_id)?;
     Ok(Json(AuthResponse { token, user }))
+}
+
+#[derive(Deserialize)]
+struct GoogleBody {
+    id_token: String,
+}
+
+#[derive(Serialize)]
+struct GoogleResponse {
+    token: String,
+    user: UserResponse,
+    created: bool,
+}
+
+async fn google(
+    State(state): State<AppState>,
+    ApiJson(body): ApiJson<GoogleBody>,
+) -> Result<(StatusCode, Json<GoogleResponse>), AppError> {
+    let claims = state
+        .google_keys
+        .verify(
+            &state.config.google_jwks_url,
+            &state.config.google_client_ids,
+            &body.id_token,
+        )
+        .await?;
+    let email = claims.email.trim().to_lowercase();
+
+    let mut client = state.pool.get().await?;
+    let known = client
+        .query_opt(
+            "SELECT u.id, u.role_id FROM auth_identities a JOIN users u ON u.id = a.user_id
+              WHERE a.provider = 'google' AND a.provider_user_id = $1",
+            &[&claims.sub],
+        )
+        .await?;
+    let (id, role_id, created) = match known {
+        Some(row) => (row.get("id"), row.get("role_id"), false),
+        None => {
+            // No account linking: an email that already has an account must sign in the old way.
+            if client
+                .query_opt("SELECT 1 FROM users WHERE email = $1", &[&email])
+                .await?
+                .is_some()
+            {
+                return Err(AppError::new(ErrorCode::EmailRegistered));
+            }
+            let display_name = claims.name.as_deref().and_then(sanitize_display_name);
+            let (id, role_id) = create_user(
+                &mut client,
+                &email,
+                display_name.as_deref(),
+                "google",
+                Some(&claims.sub),
+                None,
+            )
+            .await?;
+            (id, role_id, true)
+        }
+    };
+
+    let user = load_user(&client, &state.perms, id).await?;
+    let token = token_for(&state, id, role_id)?;
+    let status = if created {
+        StatusCode::CREATED
+    } else {
+        StatusCode::OK
+    };
+    Ok((
+        status,
+        Json(GoogleResponse {
+            token,
+            user,
+            created,
+        }),
+    ))
 }
