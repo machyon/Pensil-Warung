@@ -54,3 +54,31 @@ pub struct BroadcasterList {
     pub scheduled: Vec<BroadcastItem>,
     pub sent: Page<BroadcastItem>,
 }
+
+#[derive(Serialize)]
+pub struct BroadcasterDetail {
+    #[serde(flatten)]
+    pub broadcast: BroadcastWithBody,
+    pub effective_status: String,
+    #[serde(with = "time::serde::rfc3339")]
+    pub created_at: OffsetDateTime,
+    pub created_by_name: Option<String>,
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub cancelled_at: Option<OffsetDateTime>,
+    pub cancelled_by_name: Option<String>,
+}
+
+impl From<&Row> for BroadcasterDetail {
+    /// The item columns plus `body, effective_status, created_at, created_by_name,
+    /// cancelled_at, cancelled_by_name`.
+    fn from(r: &Row) -> Self {
+        BroadcasterDetail {
+            broadcast: r.into(),
+            effective_status: r.get("effective_status"),
+            created_at: r.get("created_at"),
+            created_by_name: r.get("created_by_name"),
+            cancelled_at: r.get("cancelled_at"),
+            cancelled_by_name: r.get("cancelled_by_name"),
+        }
+    }
+}

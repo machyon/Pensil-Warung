@@ -6,12 +6,13 @@ use axum::extract::State;
 use axum::routing::get;
 use serde::Deserialize;
 
-use super::dto::{BroadcastItem, BroadcastWithBody, BroadcasterList};
-use super::{broadcaster_list, feed, feed_one};
+use super::dto::{BroadcastItem, BroadcastWithBody, BroadcasterDetail, BroadcasterList};
+use super::{NewBroadcast, broadcaster_list, create, detail as find, feed, feed_one};
 use crate::auth::extractor::AuthUser;
 use crate::auth::perms::Perm;
-use crate::common::extract::{ApiPath, ApiQuery};
+use crate::common::extract::{ApiJson, ApiPath, ApiQuery};
 use crate::common::pagination::{Cursor, clamp_limit};
+use crate::common::response::Created;
 use crate::error::AppError;
 use crate::state::AppState;
 
@@ -19,7 +20,10 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/broadcasts", get(list))
         .route("/broadcasts/{id}", get(detail))
-        .route("/broadcaster/broadcasts", get(broadcaster_home))
+        .route(
+            "/broadcaster/broadcasts",
+            get(broadcaster_home).post(create_one),
+        )
 }
 
 async fn list(
@@ -59,4 +63,33 @@ async fn broadcaster_home(
     Ok(Json(
         broadcaster_list(&**client, before, clamp_limit(q.limit)).await?,
     ))
+}
+
+#[derive(Deserialize)]
+struct NewBroadcastBody {
+    category: String,
+    title: String,
+    summary: String,
+    body: Option<String>,
+    /// RFC 3339 time to schedule, or `null` (or missing) to send now.
+    send_at: Option<String>,
+}
+
+async fn create_one(
+    State(state): State<AppState>,
+    user: AuthUser,
+    ApiJson(b): ApiJson<NewBroadcastBody>,
+) -> Result<Created<BroadcasterDetail>, AppError> {
+    state.perms.require(&user, Perm::BroadcastCreate)?;
+    let new = NewBroadcast::new(
+        &b.category,
+        &b.title,
+        &b.summary,
+        b.body.as_deref(),
+        b.send_at.as_deref(),
+    )?;
+    let client = state.pool.get().await?;
+    let id = create(&**client, user.id, &new).await?;
+    let made = find(&**client, id).await?.ok_or_else(AppError::internal)?;
+    Ok(Created(made))
 }
