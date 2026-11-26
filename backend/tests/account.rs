@@ -1,8 +1,65 @@
 mod common;
 
+use axum::Router;
 use axum::http::StatusCode;
+use axum::http::header::CACHE_CONTROL;
+use axum::routing::get;
 use common::TestApp;
-use serde_json::json;
+use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
+use serde_json::{Value, json};
+use time::OffsetDateTime;
+use uuid::Uuid;
+
+const CLIENT_ID: &str = "test-client.apps.googleusercontent.com";
+const PRIVATE_KEY: &str = include_str!("fixtures/google_test_key.pem");
+const JWKS: &str = include_str!("fixtures/google_jwks.json");
+
+/// App whose Google verifier trusts the fixture key, served from a local mock JWKS.
+async fn google_app() -> TestApp {
+    let router = Router::new().route(
+        "/certs",
+        get(|| async { ([(CACHE_CONTROL, "public, max-age=3600")], JWKS) }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/certs", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    TestApp::with_config(|config| {
+        config.google_client_ids = vec![CLIENT_ID.to_owned()];
+        config.google_jwks_url = url;
+    })
+    .await
+}
+
+/// A signed Google ID token for `sub`, issued `age_secs` ago.
+fn id_token(sub: &str, age_secs: i64) -> String {
+    let now = OffsetDateTime::now_utc().unix_timestamp();
+    let claims = json!({
+        "iss": "https://accounts.google.com", "aud": CLIENT_ID, "sub": sub,
+        "email": "budi@example.com", "email_verified": true,
+        "iat": now - age_secs, "exp": now + 3600,
+    });
+    let mut header = Header::new(Algorithm::RS256);
+    header.kid = Some("test-key".to_owned());
+    let key = EncodingKey::from_rsa_pem(PRIVATE_KEY.as_bytes()).unwrap();
+    encode(&header, &claims, &key).unwrap()
+}
+
+async fn google_sub(app: &TestApp) -> String {
+    app.client()
+        .await
+        .query_one(
+            "SELECT provider_user_id FROM auth_identities WHERE provider = 'google'",
+            &[],
+        )
+        .await
+        .unwrap()
+        .get(0)
+}
+
+async fn delete_with(app: &TestApp, token: &str, body: Value) -> common::TestResponse {
+    app.delete_json("/api/v1/me", Some(token), Some(&body))
+        .await
+}
 
 async fn app_with_siti() -> (TestApp, String) {
     let app = TestApp::new().await;
@@ -262,4 +319,88 @@ async fn password_google_only_is_403() {
         .await;
     assert_eq!(res.status, StatusCode::FORBIDDEN);
     assert_eq!(res.json["error"]["code"], "google_account");
+}
+
+#[tokio::test]
+async fn delete_with_password_cascades_and_keeps_broadcasts() {
+    let (app, token) = app_with_siti().await;
+    let db = app.client().await;
+    let id: Uuid = db
+        .query_one("SELECT id FROM users", &[])
+        .await
+        .unwrap()
+        .get(0);
+    db.execute(
+        "INSERT INTO broadcasts (category, title, summary, status, broadcasted_at, created_by)
+         VALUES ('update', 'Halo', 'Ringkasan', 'sent', now(), $1)",
+        &[&id],
+    )
+    .await
+    .unwrap();
+
+    let res = delete_with(&app, &token, json!({"current_password": "rahasia123"})).await;
+    assert_eq!(res.status, StatusCode::NO_CONTENT, "{}", res.text);
+
+    let count = |sql: &'static str| {
+        let db = &db;
+        async move { db.query_one(sql, &[]).await.unwrap().get::<_, i64>(0) }
+    };
+    assert_eq!(count("SELECT count(*) FROM users").await, 0);
+    assert_eq!(count("SELECT count(*) FROM auth_identities").await, 0);
+    assert_eq!(
+        count("SELECT count(*) FROM broadcasts WHERE created_by IS NULL").await,
+        1
+    );
+
+    let me = app.get("/api/v1/me", Some(&token)).await;
+    assert_eq!(me.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(me.json["error"]["code"], "account_gone");
+}
+
+#[tokio::test]
+async fn delete_wrong_or_missing_password_is_rejected() {
+    let (app, token) = app_with_siti().await;
+    let res = delete_with(&app, &token, json!({"current_password": "salah-salah"})).await;
+    assert_eq!(res.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(res.json["error"]["code"], "invalid_credentials");
+    let res = delete_with(&app, &token, json!({})).await;
+    assert_eq!(res.status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        app.get("/api/v1/me", Some(&token)).await.status,
+        StatusCode::OK
+    );
+}
+
+#[tokio::test]
+async fn delete_google_only_with_fresh_token() {
+    let app = google_app().await;
+    let token = app.google_user("Budi", "budi@example.com").await;
+    let sub = google_sub(&app).await;
+    let res = delete_with(&app, &token, json!({"id_token": id_token(&sub, 60)})).await;
+    assert_eq!(res.status, StatusCode::NO_CONTENT, "{}", res.text);
+    let me = app.get("/api/v1/me", Some(&token)).await;
+    assert_eq!(me.json["error"]["code"], "account_gone");
+}
+
+#[tokio::test]
+async fn delete_google_only_needs_a_fresh_matching_token() {
+    let app = google_app().await;
+    let token = app.google_user("Budi", "budi@example.com").await;
+    let sub = google_sub(&app).await;
+    let bodies = [
+        json!({"id_token": id_token(&sub, 600)}),
+        json!({"id_token": id_token(&sub, -600)}),
+        json!({"id_token": id_token("someone-else", 0)}),
+        json!({"current_password": "apa-saja-123"}),
+        json!({}),
+    ];
+    for body in bodies {
+        let res = delete_with(&app, &token, body.clone()).await;
+        assert_eq!(res.status, StatusCode::UNAUTHORIZED, "{body}");
+        assert_eq!(res.json["error"]["code"], "reauth_required", "{body}");
+    }
+    assert_eq!(
+        app.get("/api/v1/me", Some(&token)).await.status,
+        StatusCode::OK
+    );
 }
