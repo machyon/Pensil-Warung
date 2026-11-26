@@ -111,4 +111,21 @@ mod tests {
             StatusCode::UNAUTHORIZED
         );
     }
+
+    #[tokio::test]
+    async fn tampered_token_is_401() {
+        let token = issue_token(SECRET, Uuid::new_v4(), 1, Duration::days(7)).unwrap();
+        let other = issue_token(SECRET, Uuid::new_v4(), 2, Duration::days(7)).unwrap();
+        // Payload of another token under this token's signature.
+        let forged = format!(
+            "{}.{}.{}",
+            token.split('.').next().unwrap(),
+            other.split('.').nth(1).unwrap(),
+            token.split('.').nth(2).unwrap()
+        );
+        assert_eq!(
+            call(Some(format!("Bearer {forged}"))).await,
+            StatusCode::UNAUTHORIZED
+        );
+    }
 }

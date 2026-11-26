@@ -97,3 +97,22 @@ async fn blank_display_name_falls_back_to_generated_name() {
             .starts_with("user ")
     );
 }
+
+#[tokio::test]
+async fn concurrent_signups_with_the_same_name_both_succeed() {
+    // Both inserts can pick the same username; the loser must retry instead of failing.
+    let app = TestApp::new().await;
+    let app = &app;
+    let signup = |email: &'static str| async move {
+        app.post_json(
+            "/api/v1/auth/register",
+            None,
+            &body("Siti Rahayu", email, "rahasia123"),
+        )
+        .await
+    };
+    let (a, b) = tokio::join!(signup("a@example.com"), signup("b@example.com"));
+    assert_eq!(a.status, StatusCode::CREATED, "{}", a.text);
+    assert_eq!(b.status, StatusCode::CREATED, "{}", b.text);
+    assert_ne!(a.json["user"]["username"], b.json["user"]["username"]);
+}
