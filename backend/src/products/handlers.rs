@@ -3,14 +3,18 @@
 
 use axum::Json;
 use axum::Router;
-use axum::extract::State;
-use axum::routing::{get, post};
+use axum::extract::{DefaultBodyLimit, Multipart, State};
+use axum::routing::{get, post, put};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashSet;
+use uuid::Uuid;
 
 use super::dto::ProductResponse;
-use super::{NewProduct, ProductPatch, create, delete, get as get_product, list, update};
+use super::{
+    NewProduct, ProductPatch, create, delete, get as get_product, list, photo, set_photo_key,
+    update,
+};
 use crate::auth::extractor::AuthUser;
 use crate::auth::perms::Perm;
 use crate::common::extract::{ApiJson, ApiPath, ApiQuery};
@@ -19,6 +23,9 @@ use crate::common::response::{Created, NoContent};
 use crate::error::{AppError, ErrorCode};
 use crate::state::AppState;
 
+/// Upload limit for `PUT /products/{id}/photo`, multipart framing included.
+const PHOTO_MAX_BYTES: usize = 5 * 1024 * 1024;
+
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/products", get(list_products).post(create_one))
@@ -26,6 +33,10 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/products/{id}",
             get(get_one).patch(patch_one).delete(delete_one),
+        )
+        .route(
+            "/products/{id}/photo",
+            put(put_photo).layer(DefaultBodyLimit::max(PHOTO_MAX_BYTES)),
         )
 }
 
@@ -188,4 +199,72 @@ async fn create_bulk(
 
 fn name_taken(index: usize) -> AppError {
     AppError::new(ErrorCode::NameTaken).with_details(json!({ "index": index }))
+}
+
+/// Reads the `photo` field of the multipart body. A body over the route's
+/// limit surfaces here as 413.
+async fn read_photo_field(mut multipart: Multipart) -> Result<Vec<u8>, AppError> {
+    let invalid = |reason: &str| {
+        AppError::new(ErrorCode::InvalidBody).with_details(json!({ "reason": reason }))
+    };
+    let to_error = |e: axum::extract::multipart::MultipartError| {
+        if e.status() == axum::http::StatusCode::PAYLOAD_TOO_LARGE {
+            AppError::new(ErrorCode::PayloadTooLarge)
+        } else {
+            invalid("multipart tidak valid")
+        }
+    };
+    while let Some(field) = multipart.next_field().await.map_err(to_error)? {
+        if field.name() == Some("photo") {
+            return Ok(field.bytes().await.map_err(to_error)?.to_vec());
+        }
+    }
+    Err(invalid("field photo wajib diisi"))
+}
+
+/// Replaces the product's photo: upload the new object, point the product at
+/// it, then delete the old object (best effort). The upload is re-encoded to a
+/// small JPEG, so the stored type never depends on the client.
+async fn put_photo(
+    State(state): State<AppState>,
+    user: AuthUser,
+    ApiPath(id): ApiPath<i64>,
+    multipart: Multipart,
+) -> Result<Json<ProductResponse>, AppError> {
+    state.perms.require(&user, Perm::ProductManage)?;
+    let storage = state
+        .storage
+        .clone()
+        .ok_or_else(|| AppError::new(ErrorCode::StorageUnavailable))?;
+    let client = state.pool.get().await?;
+    get_product(&**client, user.id, id).await?;
+
+    let raw = read_photo_field(multipart).await?;
+    let jpeg = tokio::task::spawn_blocking(move || photo::prepare(&raw))
+        .await
+        .map_err(|_| AppError::internal())??;
+
+    let key = format!("products/{}/{}/{}.jpg", user.id, id, Uuid::new_v4());
+    storage
+        .put(&key, jpeg, photo::CONTENT_TYPE)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "photo upload failed");
+            AppError::new(ErrorCode::StorageUnavailable)
+        })?;
+    let old = match set_photo_key(&**client, user.id, id, &key).await {
+        Ok(Some(old)) => old,
+        failed => {
+            if let Err(e) = storage.delete(&key).await {
+                tracing::warn!(error = %e, key, "could not delete orphaned photo");
+            }
+            return Err(failed.err().unwrap_or_else(AppError::not_found));
+        }
+    };
+    if let Some(old) = old
+        && let Err(e) = storage.delete(&old).await
+    {
+        tracing::warn!(error = %e, key = old, "could not delete replaced photo");
+    }
+    Ok(Json(get_product(&**client, user.id, id).await?.into()))
 }

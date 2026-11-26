@@ -187,6 +187,25 @@ pub async fn delete(client: &impl GenericClient, user_id: Uuid, id: i64) -> AppR
     Ok(n > 0)
 }
 
+/// Points the user's product at a new photo object and returns the previous
+/// key: `None` when there is no such product, `Some(None)` when it had no photo.
+pub async fn set_photo_key(
+    client: &impl GenericClient,
+    user_id: Uuid,
+    id: i64,
+    key: &str,
+) -> AppResult<Option<Option<String>>> {
+    let row = client
+        .query_opt(
+            "UPDATE products p SET photo_key = $3 FROM
+               (SELECT photo_key FROM products WHERE id = $1 AND user_id = $2 FOR UPDATE) old
+             WHERE p.id = $1 AND p.user_id = $2 RETURNING old.photo_key",
+            &[&id, &user_id, &key],
+        )
+        .await?;
+    Ok(row.map(|r| r.get(0)))
+}
+
 /// Records a stock movement and returns the product's new stock. `delta` must
 /// not be 0, and the caller must already know the product is the user's.
 /// `reason` is a `stock_reason` value; going below 0 fails with 422 `stock_insufficient`.

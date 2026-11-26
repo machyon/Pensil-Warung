@@ -37,6 +37,7 @@ pub enum ErrorCode {
     TimePassed,
     PayloadTooLarge,
     UnsupportedImage,
+    StorageUnavailable,
     DbUnavailable,
     Internal,
 }
@@ -67,6 +68,7 @@ impl ErrorCode {
             ErrorCode::TimePassed => "time_passed",
             ErrorCode::PayloadTooLarge => "payload_too_large",
             ErrorCode::UnsupportedImage => "unsupported_image",
+            ErrorCode::StorageUnavailable => "storage_unavailable",
             ErrorCode::DbUnavailable => "db_unavailable",
             ErrorCode::Internal => "internal",
         }
@@ -136,6 +138,10 @@ impl ErrorCode {
             ErrorCode::UnsupportedImage => (
                 StatusCode::UNSUPPORTED_MEDIA_TYPE,
                 "Foto harus berformat JPEG, PNG, atau WebP.",
+            ),
+            ErrorCode::StorageUnavailable => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Penyimpanan foto belum tersedia.",
             ),
             ErrorCode::DbUnavailable => (
                 StatusCode::SERVICE_UNAVAILABLE,
@@ -283,7 +289,7 @@ mod tests {
     use super::*;
     use axum::body::to_bytes;
 
-    const ALL: [ErrorCode; 24] = [
+    const ALL: [ErrorCode; 25] = [
         ErrorCode::InvalidBody,
         ErrorCode::InvalidQuery,
         ErrorCode::InvalidPath,
@@ -306,6 +312,7 @@ mod tests {
         ErrorCode::TimePassed,
         ErrorCode::PayloadTooLarge,
         ErrorCode::UnsupportedImage,
+        ErrorCode::StorageUnavailable,
         ErrorCode::DbUnavailable,
         ErrorCode::Internal,
     ];

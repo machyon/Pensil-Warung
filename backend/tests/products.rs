@@ -558,3 +558,114 @@ async fn delete_removes_movements_but_keeps_sale_snapshots() {
     assert_eq!(row.get::<_, String>(1), "Nasi Goreng");
     assert_eq!(row.get::<_, i64>(2), 1000);
 }
+
+fn multipart(field: &str, content_type: &str, bytes: &[u8]) -> (String, Vec<u8>) {
+    let boundary = "XBOUNDARYX";
+    let mut body = format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"{field}\"; filename=\"f\"\r\n\
+         Content-Type: {content_type}\r\n\r\n"
+    )
+    .into_bytes();
+    body.extend_from_slice(bytes);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    (format!("multipart/form-data; boundary={boundary}"), body)
+}
+
+async fn put_photo(
+    app: &TestApp,
+    token: &str,
+    id: &Value,
+    field: &str,
+    content_type: &str,
+    bytes: &[u8],
+) -> common::TestResponse {
+    let (ct, body) = multipart(field, content_type, bytes);
+    let req = axum::http::Request::put(format!("{P}/{id}/photo"))
+        .header("authorization", format!("Bearer {token}"))
+        .header("content-type", ct)
+        .body(axum::body::Body::from(body))
+        .unwrap();
+    app.send(req).await
+}
+
+fn tiny_png() -> Vec<u8> {
+    let mut out = std::io::Cursor::new(Vec::new());
+    image::RgbaImage::from_pixel(8, 8, image::Rgba([200, 30, 30, 255]))
+        .write_to(&mut out, image::ImageFormat::Png)
+        .unwrap();
+    out.into_inner()
+}
+
+async fn photo_key_of(app: &TestApp, id: &Value) -> Option<String> {
+    let id = id.as_i64().unwrap();
+    app.client()
+        .await
+        .query_one("SELECT photo_key FROM products WHERE id = $1", &[&id])
+        .await
+        .unwrap()
+        .get(0)
+}
+
+#[tokio::test]
+async fn put_photo_stores_a_jpeg_and_replace_deletes_the_old_object() {
+    let app = TestApp::new().await;
+    let token = app.register("Siti", "siti@example.com", "rahasia123").await;
+    let uid = user_id(&app, "siti@example.com").await;
+    let id = seed(&app, &token, "Nasi Goreng", 1).await;
+    let storage = app.storage.clone().unwrap();
+    let prefix = format!("products/{uid}/{id}/");
+
+    // The client's content type is ignored: the bytes decide.
+    let res = put_photo(&app, &token, &id, "photo", "text/plain", &tiny_png()).await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.text);
+    assert_eq!(res.json["id"], id);
+    let first = photo_key_of(&app, &id).await.unwrap();
+    assert!(
+        first.starts_with(&prefix) && first.ends_with(".jpg"),
+        "{first}"
+    );
+    assert_eq!(storage.keys(), std::slice::from_ref(&first));
+    let (bytes, content_type) = storage.get(&first).unwrap();
+    assert_eq!(content_type, "image/jpeg");
+    assert_eq!(&bytes[..2], [0xFF, 0xD8]);
+
+    let res = put_photo(&app, &token, &id, "photo", "image/png", &tiny_png()).await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.text);
+    let second = photo_key_of(&app, &id).await.unwrap();
+    assert_ne!(first, second);
+    assert_eq!(storage.keys(), [second]);
+}
+
+#[tokio::test]
+async fn put_photo_rejects_bad_input_and_other_users() {
+    let app = TestApp::new().await;
+    let a = app.register("Siti", "siti@example.com", "rahasia123").await;
+    let b = app.register("Budi", "budi@example.com", "rahasia123").await;
+    let id = seed(&app, &a, "Nasi Goreng", 1).await;
+
+    let res = put_photo(&app, &a, &id, "photo", "image/png", b"not an image").await;
+    assert_eq!(res.status, StatusCode::UNSUPPORTED_MEDIA_TYPE);
+    assert_eq!(res.json["error"]["code"], "unsupported_image");
+    let res = put_photo(&app, &a, &id, "other", "image/png", &tiny_png()).await;
+    assert_eq!(res.status, StatusCode::BAD_REQUEST);
+    let res = put_photo(&app, &b, &id, "photo", "image/png", &tiny_png()).await;
+    assert_eq!(res.status, StatusCode::NOT_FOUND);
+    let big = vec![0u8; 5 * 1024 * 1024 + 1];
+    let res = put_photo(&app, &a, &id, "photo", "image/png", &big).await;
+    assert_eq!(res.status, StatusCode::PAYLOAD_TOO_LARGE);
+    assert_eq!(res.json["error"]["code"], "payload_too_large");
+
+    assert!(app.storage.as_ref().unwrap().keys().is_empty());
+    assert_eq!(photo_key_of(&app, &id).await, None);
+}
+
+#[tokio::test]
+async fn put_photo_without_storage_is_503() {
+    let app = TestApp::without_storage().await;
+    let token = app.register("Siti", "siti@example.com", "rahasia123").await;
+    let id = seed(&app, &token, "Nasi Goreng", 1).await;
+    let res = put_photo(&app, &token, &id, "photo", "image/png", &tiny_png()).await;
+    assert_eq!(res.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(res.json["error"]["code"], "storage_unavailable");
+    assert_eq!(photo_key_of(&app, &id).await, None);
+}
