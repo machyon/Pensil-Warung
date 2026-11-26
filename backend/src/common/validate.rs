@@ -31,7 +31,10 @@ pub fn max_len(field: &str, value: &str, max: usize) -> Result<(), AppError> {
     Ok(())
 }
 
-/// A quantity must be a whole number greater than zero.
+/// Largest quantity accepted in one line.
+pub const MAX_QUANTITY: i64 = 999_999_999;
+
+/// A quantity must be a whole number greater than zero, at most [`MAX_QUANTITY`].
 pub fn whole_quantity(field: &str, value: Decimal) -> Result<(), AppError> {
     if value <= Decimal::ZERO {
         return Err(invalid(field, format!("{field} harus lebih dari 0.")));
@@ -41,6 +44,9 @@ pub fn whole_quantity(field: &str, value: Decimal) -> Result<(), AppError> {
             field,
             format!("{field} harus berupa bilangan bulat."),
         ));
+    }
+    if value > Decimal::from(MAX_QUANTITY) {
+        return Err(invalid(field, format!("{field} maksimal {MAX_QUANTITY}.")));
     }
     Ok(())
 }
@@ -84,6 +90,8 @@ mod tests {
         assert!(whole_quantity("jumlah", dec("2.5")).is_err());
         assert!(whole_quantity("jumlah", dec("0")).is_err());
         assert!(whole_quantity("jumlah", dec("-1")).is_err());
+        assert!(whole_quantity("jumlah", dec("999999999")).is_ok());
+        assert!(whole_quantity("jumlah", dec("1000000000")).is_err());
     }
 
     #[test]

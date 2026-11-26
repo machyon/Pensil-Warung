@@ -3,6 +3,7 @@
 
 pub mod account;
 pub mod auth;
+pub mod catat;
 pub mod common;
 pub mod config;
 pub mod db;
@@ -11,3 +12,4 @@ pub mod products;
 pub mod routes;
 pub mod state;
 pub mod storage;
+pub mod transactions;

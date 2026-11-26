@@ -20,6 +20,10 @@ pub enum ErrorCode {
     InvalidPath,
     InvalidValue,
     InvalidName,
+    InvalidQuantity,
+    InvalidPrice,
+    ProductNotFound,
+    LinesInvalid,
     NotFound,
     Unauthorized,
     InvalidCredentials,
@@ -51,6 +55,10 @@ impl ErrorCode {
             ErrorCode::InvalidPath => "invalid_path",
             ErrorCode::InvalidValue => "invalid_value",
             ErrorCode::InvalidName => "invalid_name",
+            ErrorCode::InvalidQuantity => "invalid_quantity",
+            ErrorCode::InvalidPrice => "invalid_price",
+            ErrorCode::ProductNotFound => "product_not_found",
+            ErrorCode::LinesInvalid => "lines_invalid",
             ErrorCode::NotFound => "not_found",
             ErrorCode::Unauthorized => "unauthorized",
             ErrorCode::InvalidCredentials => "invalid_credentials",
@@ -89,6 +97,19 @@ impl ErrorCode {
             ErrorCode::InvalidName => (
                 StatusCode::UNPROCESSABLE_ENTITY,
                 "Nama yang dimasukkan tidak valid.",
+            ),
+            ErrorCode::InvalidQuantity => (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Jumlah yang dimasukkan tidak valid.",
+            ),
+            ErrorCode::InvalidPrice => (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Harga yang dimasukkan tidak valid.",
+            ),
+            ErrorCode::ProductNotFound => (StatusCode::NOT_FOUND, "Produk tidak ditemukan."),
+            ErrorCode::LinesInvalid => (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Ada baris yang tidak valid.",
             ),
             ErrorCode::NotFound => (StatusCode::NOT_FOUND, "Data tidak ditemukan."),
             ErrorCode::Unauthorized => (
@@ -225,6 +246,10 @@ impl AppError {
     pub fn code(&self) -> ErrorCode {
         self.code
     }
+
+    pub fn message(&self) -> &str {
+        &self.message
+    }
 }
 
 impl IntoResponse for AppError {
@@ -289,12 +314,16 @@ mod tests {
     use super::*;
     use axum::body::to_bytes;
 
-    const ALL: [ErrorCode; 25] = [
+    const ALL: [ErrorCode; 29] = [
         ErrorCode::InvalidBody,
         ErrorCode::InvalidQuery,
         ErrorCode::InvalidPath,
         ErrorCode::InvalidValue,
         ErrorCode::InvalidName,
+        ErrorCode::InvalidQuantity,
+        ErrorCode::InvalidPrice,
+        ErrorCode::ProductNotFound,
+        ErrorCode::LinesInvalid,
         ErrorCode::NotFound,
         ErrorCode::Unauthorized,
         ErrorCode::InvalidCredentials,
