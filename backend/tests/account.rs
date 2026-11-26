@@ -85,3 +85,34 @@ async fn username_taken_is_409() {
     assert_eq!(res.status, StatusCode::CONFLICT);
     assert_eq!(res.json["error"]["code"], "username_taken");
 }
+
+#[tokio::test]
+async fn display_name_is_sanitized_and_username_kept() {
+    let (app, token) = app_with_siti().await;
+    let res = app
+        .patch_json(
+            "/api/v1/me/display-name",
+            Some(&token),
+            &json!({"display_name": "  Déwi   Sartika!! "}),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.text);
+    assert_eq!(res.json["display_name"], "Dewi Sartika");
+    assert_eq!(res.json["username"], "siti_rahayu");
+}
+
+#[tokio::test]
+async fn display_name_rejects_empty_after_cleaning_and_too_long() {
+    let (app, token) = app_with_siti().await;
+    for bad in ["!!!", "   ", "", &"a".repeat(51)] {
+        let res = app
+            .patch_json(
+                "/api/v1/me/display-name",
+                Some(&token),
+                &json!({ "display_name": bad }),
+            )
+            .await;
+        assert_eq!(res.status, StatusCode::UNPROCESSABLE_ENTITY, "{bad}");
+        assert_eq!(res.json["error"]["code"], "invalid_name");
+    }
+}

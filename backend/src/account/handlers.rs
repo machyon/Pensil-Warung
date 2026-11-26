@@ -10,6 +10,8 @@ use uuid::Uuid;
 use crate::auth::extractor::AuthUser;
 use crate::auth::user::{UserResponse, load_user};
 use crate::common::extract::ApiJson;
+use crate::common::names::sanitize_display_name;
+use crate::common::validate::max_len;
 use crate::error::{AppError, ErrorCode};
 use crate::state::AppState;
 
@@ -17,6 +19,7 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/me", get(me))
         .route("/me/username", patch(set_username))
+        .route("/me/display-name", patch(set_display_name))
 }
 
 async fn me(State(state): State<AppState>, user: AuthUser) -> Result<Json<UserResponse>, AppError> {
@@ -67,6 +70,35 @@ async fn set_username(
         user.id,
         "UPDATE users SET username = $1 WHERE id = $2",
         &body.username,
+    )
+    .await
+}
+
+#[derive(Deserialize)]
+struct DisplayNameBody {
+    display_name: String,
+}
+
+async fn set_display_name(
+    State(state): State<AppState>,
+    user: AuthUser,
+    ApiJson(body): ApiJson<DisplayNameBody>,
+) -> Result<Json<UserResponse>, AppError> {
+    max_len("display_name", &body.display_name, 100)?;
+    let name = sanitize_display_name(&body.display_name)
+        .filter(|n| n.chars().count() <= 50)
+        .ok_or_else(|| {
+            AppError::validation(
+                ErrorCode::InvalidName,
+                "display_name",
+                "Nama 1-50 karakter: huruf, angka, dan spasi.",
+            )
+        })?;
+    update_and_load(
+        &state,
+        user.id,
+        "UPDATE users SET display_name = $1 WHERE id = $2",
+        &name,
     )
     .await
 }
