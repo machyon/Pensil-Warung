@@ -19,6 +19,7 @@ use backend::config::Config;
 use backend::db;
 use backend::routes;
 use backend::state::AppState;
+use backend::storage::{MemoryStorage, Storage};
 use deadpool_postgres::{Object, Pool};
 use http_body_util::BodyExt;
 use serde_json::Value;
@@ -32,6 +33,8 @@ pub struct TestApp {
     pub router: Router,
     pub pool: Pool,
     pub config: Arc<Config>,
+    /// The fake photo storage, or `None` for an app built with `without_storage`.
+    pub storage: Option<Arc<MemoryStorage>>,
     /// Name of this test's database, `pw_test_<uuid>`.
     pub db_name: String,
     /// `TEST_DATABASE_URL` as given, used to create and drop the database.
@@ -54,6 +57,15 @@ impl TestApp {
 
     /// Like `new`, but `customize` can change the config before the app is built.
     pub async fn with_config(customize: impl FnOnce(&mut Config)) -> Self {
+        Self::build(customize, true).await
+    }
+
+    /// An app whose photo routes answer 503 `storage_unavailable`.
+    pub async fn without_storage() -> Self {
+        Self::build(|_| {}, false).await
+    }
+
+    async fn build(customize: impl FnOnce(&mut Config), with_storage: bool) -> Self {
         let admin_url = std::env::var("TEST_DATABASE_URL")
             .ok()
             .filter(|v| !v.trim().is_empty())
@@ -78,11 +90,13 @@ impl TestApp {
         customize(&mut config);
         let pool = db::create_pool(&config).expect("test pool");
         let config = Arc::new(config);
+        let storage = with_storage.then(|| Arc::new(MemoryStorage::default()));
         let state = AppState {
             pool: pool.clone(),
             config: config.clone(),
             perms: Arc::default(),
             google_keys: Arc::default(),
+            storage: storage.clone().map(|s| s as Arc<dyn Storage>),
         };
 
         // Built before the migrations, so a failure below still drops the database.
@@ -91,6 +105,7 @@ impl TestApp {
             router: Router::new(),
             pool,
             config,
+            storage,
             db_name,
             admin_url,
         };

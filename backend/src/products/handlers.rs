@@ -3,14 +3,18 @@
 
 use axum::Json;
 use axum::Router;
-use axum::extract::State;
-use axum::routing::{get, post};
+use axum::extract::{DefaultBodyLimit, Multipart, State};
+use axum::routing::{get, post, put};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashSet;
+use uuid::Uuid;
 
-use super::dto::ProductResponse;
-use super::{NewProduct, ProductPatch, create, delete, get as get_product, list, update};
+use super::dto::{ProductResponse, respond, respond_one};
+use super::{
+    NewProduct, ProductPatch, clear_photo_key, create, delete, get as get_product, list, photo,
+    set_photo_key, update,
+};
 use crate::auth::extractor::AuthUser;
 use crate::auth::perms::Perm;
 use crate::common::extract::{ApiJson, ApiPath, ApiQuery};
@@ -19,6 +23,12 @@ use crate::common::response::{Created, NoContent};
 use crate::error::{AppError, ErrorCode};
 use crate::state::AppState;
 
+/// Largest `photo` field accepted by `PUT /products/{id}/photo`.
+const PHOTO_MAX_BYTES: usize = 5 * 1024 * 1024;
+/// Room for the multipart framing around the photo, so a photo just under the
+/// limit is not cut off by the body limit.
+const MULTIPART_ALLOWANCE: usize = 64 * 1024;
+
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/products", get(list_products).post(create_one))
@@ -26,6 +36,12 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/products/{id}",
             get(get_one).patch(patch_one).delete(delete_one),
+        )
+        .route(
+            "/products/{id}/photo",
+            put(put_photo)
+                .delete(delete_photo)
+                .layer(DefaultBodyLimit::max(PHOTO_MAX_BYTES + MULTIPART_ALLOWANCE)),
         )
 }
 
@@ -47,11 +63,8 @@ async fn list_products(
 ) -> Result<Json<ListResponse>, AppError> {
     state.perms.require(&user, Perm::ProductManage)?;
     let client = state.pool.get().await?;
-    let items: Vec<ProductResponse> = list(&**client, user.id, query.q.as_deref())
-        .await?
-        .into_iter()
-        .map(Into::into)
-        .collect();
+    let products = list(&**client, user.id, query.q.as_deref()).await?;
+    let items = respond(&state, products).await;
     Ok(Json(ListResponse {
         count: items.len(),
         items,
@@ -65,7 +78,8 @@ async fn get_one(
 ) -> Result<Json<ProductResponse>, AppError> {
     state.perms.require(&user, Perm::ProductManage)?;
     let client = state.pool.get().await?;
-    Ok(Json(get_product(&**client, user.id, id).await?.into()))
+    let product = get_product(&**client, user.id, id).await?;
+    Ok(Json(respond_one(&state, product).await))
 }
 
 /// All fields optional. `stock` is the new absolute stock (an integer).
@@ -91,9 +105,8 @@ async fn patch_one(
         body.note.as_deref(),
     )?;
     let mut client = state.pool.get().await?;
-    Ok(Json(
-        update(&mut **client, user.id, id, &patch).await?.into(),
-    ))
+    let product = update(&mut **client, user.id, id, &patch).await?;
+    Ok(Json(respond_one(&state, product).await))
 }
 
 /// Hard delete: movements go with it, sale items keep their snapshots.
@@ -104,10 +117,10 @@ async fn delete_one(
 ) -> Result<NoContent, AppError> {
     state.perms.require(&user, Perm::ProductManage)?;
     let client = state.pool.get().await?;
-    if !delete(&**client, user.id, id).await? {
-        return Err(AppError::not_found());
-    }
-    // TODO(branch 05): delete the product's photo object.
+    let key = delete(&**client, user.id, id)
+        .await?
+        .ok_or_else(AppError::not_found)?;
+    photo::delete_object(&state.storage, key).await;
     Ok(NoContent)
 }
 
@@ -133,7 +146,8 @@ async fn create_one(
     state.perms.require(&user, Perm::ProductManage)?;
     let new = body.validate()?;
     let client = state.pool.get().await?;
-    Ok(Created(create(&**client, user.id, &new).await?.into()))
+    let product = create(&**client, user.id, &new).await?;
+    Ok(Created(respond_one(&state, product).await))
 }
 
 #[derive(Deserialize)]
@@ -174,18 +188,106 @@ async fn create_bulk(
     }
     let mut client = state.pool.get().await?;
     let tx = client.transaction().await?;
-    let mut items = Vec::with_capacity(new.len());
+    let mut products = Vec::with_capacity(new.len());
     for (index, item) in new.iter().enumerate() {
         match create(&*tx, user.id, item).await {
-            Ok(p) => items.push(p.into()),
+            Ok(p) => products.push(p),
             Err(e) if e.code() == ErrorCode::NameTaken => return Err(name_taken(index)),
             Err(e) => return Err(e),
         }
     }
     tx.commit().await?;
+    let items = respond(&state, products).await;
     Ok(Created(BulkResponse { items }))
 }
 
 fn name_taken(index: usize) -> AppError {
     AppError::new(ErrorCode::NameTaken).with_details(json!({ "index": index }))
+}
+
+/// Reads the `photo` field of the multipart body. A body over the route's
+/// limit surfaces here as 413.
+async fn read_photo_field(mut multipart: Multipart) -> Result<Vec<u8>, AppError> {
+    let invalid = |reason: &str| {
+        AppError::new(ErrorCode::InvalidBody).with_details(json!({ "reason": reason }))
+    };
+    let to_error = |e: axum::extract::multipart::MultipartError| {
+        if e.status() == axum::http::StatusCode::PAYLOAD_TOO_LARGE {
+            AppError::new(ErrorCode::PayloadTooLarge)
+        } else {
+            invalid("multipart tidak valid")
+        }
+    };
+    while let Some(field) = multipart.next_field().await.map_err(to_error)? {
+        if field.name() == Some("photo") {
+            let bytes = field.bytes().await.map_err(to_error)?;
+            if bytes.len() > PHOTO_MAX_BYTES {
+                return Err(AppError::new(ErrorCode::PayloadTooLarge));
+            }
+            return Ok(bytes.to_vec());
+        }
+    }
+    Err(invalid("field photo wajib diisi"))
+}
+
+/// Replaces the product's photo: upload the new object, point the product at
+/// it, then delete the old object (best effort). The upload is re-encoded to a
+/// small JPEG, so the stored type never depends on the client.
+async fn put_photo(
+    State(state): State<AppState>,
+    user: AuthUser,
+    ApiPath(id): ApiPath<i64>,
+    multipart: Multipart,
+) -> Result<Json<ProductResponse>, AppError> {
+    state.perms.require(&user, Perm::ProductManage)?;
+    let storage = state
+        .storage
+        .clone()
+        .ok_or_else(|| AppError::new(ErrorCode::StorageUnavailable))?;
+    let client = state.pool.get().await?;
+    get_product(&**client, user.id, id).await?;
+
+    let raw = read_photo_field(multipart).await?;
+    let jpeg = tokio::task::spawn_blocking(move || photo::prepare(&raw))
+        .await
+        .map_err(|_| AppError::internal())??;
+
+    let key = format!("products/{}/{}/{}.jpg", user.id, id, Uuid::new_v4());
+    storage
+        .put(&key, jpeg, photo::CONTENT_TYPE)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "photo upload failed");
+            AppError::new(ErrorCode::StorageUnavailable)
+        })?;
+    let old = match set_photo_key(&**client, user.id, id, &key).await {
+        Ok(Some(old)) => old,
+        failed => {
+            if let Err(e) = storage.delete(&key).await {
+                tracing::warn!(error = %e, key, "could not delete orphaned photo");
+            }
+            return Err(failed.err().unwrap_or_else(AppError::not_found));
+        }
+    };
+    photo::delete_object(&state.storage, old).await;
+    let product = get_product(&**client, user.id, id).await?;
+    Ok(Json(respond_one(&state, product).await))
+}
+
+/// Removes the product's photo. Idempotent: 204 even when there was none.
+async fn delete_photo(
+    State(state): State<AppState>,
+    user: AuthUser,
+    ApiPath(id): ApiPath<i64>,
+) -> Result<NoContent, AppError> {
+    state.perms.require(&user, Perm::ProductManage)?;
+    if state.storage.is_none() {
+        return Err(AppError::new(ErrorCode::StorageUnavailable));
+    }
+    let client = state.pool.get().await?;
+    let key = clear_photo_key(&**client, user.id, id)
+        .await?
+        .ok_or_else(AppError::not_found)?;
+    photo::delete_object(&state.storage, key).await;
+    Ok(NoContent)
 }

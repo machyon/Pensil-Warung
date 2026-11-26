@@ -8,6 +8,7 @@
 
 pub mod dto;
 pub mod handlers;
+pub mod photo;
 
 use rust_decimal::Decimal;
 use time::OffsetDateTime;
@@ -18,13 +19,14 @@ use crate::common::names::{name_key, normalize_product_name};
 use crate::common::validate::{max_len, non_negative_money};
 use crate::error::{AppError, AppResult, ErrorCode};
 
-const COLUMNS: &str = "id, name, price, stock, created_at, updated_at";
+const COLUMNS: &str = "id, name, price, stock, photo_key, created_at, updated_at";
 
 pub struct Product {
     pub id: i64,
     pub name: String,
     pub price: i64,
     pub stock: Decimal,
+    pub photo_key: Option<String>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
 }
@@ -36,6 +38,7 @@ impl From<&Row> for Product {
             name: row.get("name"),
             price: row.get("price"),
             stock: row.get("stock"),
+            photo_key: row.get("photo_key"),
             created_at: row.get("created_at"),
             updated_at: row.get("updated_at"),
         }
@@ -175,15 +178,58 @@ pub async fn update(
 }
 
 /// Deletes one of the user's products (movements cascade, sale snapshots stay).
-/// Returns false when there is no such product.
-pub async fn delete(client: &impl GenericClient, user_id: Uuid, id: i64) -> AppResult<bool> {
-    let n = client
-        .execute(
-            "DELETE FROM products WHERE id = $1 AND user_id = $2",
+/// Returns the deleted row's photo key: `None` when there is no such product,
+/// `Some(None)` when it had no photo. After commit, pass the key to
+/// `photo::delete_object`.
+pub async fn delete(
+    client: &impl GenericClient,
+    user_id: Uuid,
+    id: i64,
+) -> AppResult<Option<Option<String>>> {
+    let row = client
+        .query_opt(
+            "DELETE FROM products WHERE id = $1 AND user_id = $2 RETURNING photo_key",
             &[&id, &user_id],
         )
         .await?;
-    Ok(n > 0)
+    Ok(row.map(|r| r.get(0)))
+}
+
+/// Clears the user's product photo and returns the previous key, with the same
+/// `None` / `Some(None)` meaning as `delete`.
+pub async fn clear_photo_key(
+    client: &impl GenericClient,
+    user_id: Uuid,
+    id: i64,
+) -> AppResult<Option<Option<String>>> {
+    let row = client
+        .query_opt(
+            "UPDATE products p SET photo_key = NULL FROM
+               (SELECT photo_key FROM products WHERE id = $1 AND user_id = $2 FOR UPDATE) old
+             WHERE p.id = $1 AND p.user_id = $2 RETURNING old.photo_key",
+            &[&id, &user_id],
+        )
+        .await?;
+    Ok(row.map(|r| r.get(0)))
+}
+
+/// Points the user's product at a new photo object and returns the previous
+/// key: `None` when there is no such product, `Some(None)` when it had no photo.
+pub async fn set_photo_key(
+    client: &impl GenericClient,
+    user_id: Uuid,
+    id: i64,
+    key: &str,
+) -> AppResult<Option<Option<String>>> {
+    let row = client
+        .query_opt(
+            "UPDATE products p SET photo_key = $3 FROM
+               (SELECT photo_key FROM products WHERE id = $1 AND user_id = $2 FOR UPDATE) old
+             WHERE p.id = $1 AND p.user_id = $2 RETURNING old.photo_key",
+            &[&id, &user_id, &key],
+        )
+        .await?;
+    Ok(row.map(|r| r.get(0)))
 }
 
 /// Records a stock movement and returns the product's new stock. `delta` must

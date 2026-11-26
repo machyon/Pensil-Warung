@@ -10,3 +10,4 @@ pub mod error;
 pub mod products;
 pub mod routes;
 pub mod state;
+pub mod storage;
