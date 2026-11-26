@@ -8,6 +8,8 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::auth::extractor::AuthUser;
+use crate::auth::handlers::normalize_email;
+use crate::auth::password::verify_password;
 use crate::auth::user::{UserResponse, load_user};
 use crate::common::extract::ApiJson;
 use crate::common::names::sanitize_display_name;
@@ -20,6 +22,7 @@ pub fn routes() -> Router<AppState> {
         .route("/me", get(me))
         .route("/me/username", patch(set_username))
         .route("/me/display-name", patch(set_display_name))
+        .route("/me/email", patch(set_email))
 }
 
 async fn me(State(state): State<AppState>, user: AuthUser) -> Result<Json<UserResponse>, AppError> {
@@ -99,6 +102,69 @@ async fn set_display_name(
         user.id,
         "UPDATE users SET display_name = $1 WHERE id = $2",
         &name,
+    )
+    .await
+}
+
+/// Checks `current_password` against the user's password identity.
+/// Google-only users get 403 `google_account`, a wrong password gets 401.
+async fn check_current_password(
+    client: &deadpool_postgres::Client,
+    id: Uuid,
+    current_password: String,
+) -> Result<(), AppError> {
+    max_len("current_password", &current_password, 128)?;
+    let row = client
+        .query_opt(
+            "SELECT a.password_hash
+               FROM users u
+               LEFT JOIN auth_identities a ON a.user_id = u.id AND a.provider = 'password'
+              WHERE u.id = $1",
+            &[&id],
+        )
+        .await?
+        .ok_or_else(|| AppError::new(ErrorCode::AccountGone))?;
+    let hash: String = row
+        .get::<_, Option<String>>("password_hash")
+        .ok_or_else(|| AppError::new(ErrorCode::GoogleAccount))?;
+    let ok = tokio::task::spawn_blocking(move || verify_password(&current_password, &hash))
+        .await
+        .map_err(|_| AppError::internal())?;
+    if ok {
+        Ok(())
+    } else {
+        Err(AppError::new(ErrorCode::InvalidCredentials).with_message("Kata sandi saat ini salah."))
+    }
+}
+
+#[derive(Deserialize)]
+struct EmailBody {
+    email: String,
+    current_password: String,
+}
+
+async fn set_email(
+    State(state): State<AppState>,
+    user: AuthUser,
+    ApiJson(body): ApiJson<EmailBody>,
+) -> Result<Json<UserResponse>, AppError> {
+    let email = normalize_email(&body.email)?;
+    max_len("email", &email, 254)?;
+    if !email.contains('@') {
+        return Err(AppError::validation(
+            ErrorCode::InvalidValue,
+            "email",
+            "Format email tidak valid.",
+        ));
+    }
+    let client = state.pool.get().await?;
+    check_current_password(&client, user.id, body.current_password).await?;
+    drop(client);
+    update_and_load(
+        &state,
+        user.id,
+        "UPDATE users SET email = $1 WHERE id = $2",
+        &email,
     )
     .await
 }

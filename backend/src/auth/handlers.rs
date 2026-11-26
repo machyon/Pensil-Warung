@@ -69,11 +69,11 @@ struct LoginBody {
     password: String,
 }
 
-fn normalize_email(raw: &str) -> Result<String, AppError> {
+pub(crate) fn normalize_email(raw: &str) -> Result<String, AppError> {
     Ok(trim_required("email", raw)?.to_lowercase())
 }
 
-fn check_password_len(password: &str) -> Result<(), AppError> {
+pub(crate) fn check_password_len(password: &str) -> Result<(), AppError> {
     let len = password.chars().count();
     if len < MIN_PASSWORD_CHARS {
         return Err(AppError::validation(
@@ -94,7 +94,7 @@ fn token_for(state: &AppState, id: Uuid, role_id: i32) -> Result<String, AppErro
     )
 }
 
-async fn hash_blocking(password: String) -> Result<String, AppError> {
+pub(crate) async fn hash_blocking(password: String) -> Result<String, AppError> {
     tokio::task::spawn_blocking(move || hash_password(&password))
         .await
         .map_err(|_| AppError::internal())?

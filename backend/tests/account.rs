@@ -116,3 +116,85 @@ async fn display_name_rejects_empty_after_cleaning_and_too_long() {
         assert_eq!(res.json["error"]["code"], "invalid_name");
     }
 }
+
+#[tokio::test]
+async fn email_changes_with_correct_password_and_is_normalized() {
+    let (app, token) = app_with_siti().await;
+    let res = app
+        .patch_json(
+            "/api/v1/me/email",
+            Some(&token),
+            &json!({"email": " Baru@Example.com ", "current_password": "rahasia123"}),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.text);
+    assert_eq!(res.json["email"], "baru@example.com");
+    let login = app
+        .post_json(
+            "/api/v1/auth/login",
+            None,
+            &json!({"email": "baru@example.com", "password": "rahasia123"}),
+        )
+        .await;
+    assert_eq!(login.status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn email_wrong_password_is_401() {
+    let (app, token) = app_with_siti().await;
+    let res = app
+        .patch_json(
+            "/api/v1/me/email",
+            Some(&token),
+            &json!({"email": "baru@example.com", "current_password": "salah-banget"}),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(res.json["error"]["code"], "invalid_credentials");
+    let me = app.get("/api/v1/me", Some(&token)).await;
+    assert_eq!(me.json["email"], "siti@example.com");
+}
+
+#[tokio::test]
+async fn email_taken_is_409() {
+    let (app, token) = app_with_siti().await;
+    app.register("Budi", "budi@example.com", "rahasia123").await;
+    let res = app
+        .patch_json(
+            "/api/v1/me/email",
+            Some(&token),
+            &json!({"email": "BUDI@example.com", "current_password": "rahasia123"}),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::CONFLICT);
+    assert_eq!(res.json["error"]["code"], "email_taken");
+}
+
+#[tokio::test]
+async fn email_rejects_malformed() {
+    let (app, token) = app_with_siti().await;
+    let res = app
+        .patch_json(
+            "/api/v1/me/email",
+            Some(&token),
+            &json!({"email": "bukan-email", "current_password": "rahasia123"}),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(res.json["error"]["code"], "invalid_value");
+}
+
+#[tokio::test]
+async fn email_google_only_is_403() {
+    let app = TestApp::new().await;
+    let token = app.google_user("Budi", "budi@example.com").await;
+    let res = app
+        .patch_json(
+            "/api/v1/me/email",
+            Some(&token),
+            &json!({"email": "baru@example.com", "current_password": "apa-saja-123"}),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::FORBIDDEN);
+    assert_eq!(res.json["error"]["code"], "google_account");
+}
