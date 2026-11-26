@@ -4,14 +4,17 @@ use std::sync::Arc;
 
 use deadpool_postgres::Pool;
 
+use crate::auth::google::GoogleKeys;
 use crate::auth::perms::Permissions;
 use crate::config::Config;
 
-/// Storage and Google handles are added by later branches.
+/// The storage handle is added by a later branch.
 #[derive(Clone)]
 pub struct AppState {
     pub pool: Pool,
     pub config: Arc<Config>,
     /// Role permissions, loaded once at startup (`Permissions::load`).
     pub perms: Arc<Permissions>,
+    /// Cached Google signing keys for `POST /auth/google`.
+    pub google_keys: Arc<GoogleKeys>,
 }

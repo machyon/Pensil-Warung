@@ -97,6 +97,7 @@ async fn serve(config: Config) -> Result<(), AnyError> {
         pool,
         config: Arc::new(config),
         perms,
+        google_keys: Arc::default(),
     };
     let app = routes::router(state);
 

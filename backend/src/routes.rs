@@ -145,6 +145,7 @@ mod tests {
             pool,
             config: Arc::new(config),
             perms: Arc::default(),
+            google_keys: Arc::default(),
         }
     }
 

@@ -83,6 +83,8 @@ pub struct Config {
 
     /// Accepted Google OAuth client ids (Android, iOS, web). May be empty until Google login is used.
     pub google_client_ids: Vec<String>,
+    /// Where Google's signing keys are fetched from (`GOOGLE_JWKS_URL`). Tests point it at a mock.
+    pub google_jwks_url: String,
 
     pub storage: Option<StorageConfig>,
 }
@@ -166,6 +168,9 @@ impl Config {
             .map(|v| parse_client_ids(&v))
             .unwrap_or_default();
 
+        let google_jwks_url = get("GOOGLE_JWKS_URL")
+            .unwrap_or_else(|| crate::auth::google::GOOGLE_JWKS_URL.to_owned());
+
         let storage = resolve_storage(&get)?;
 
         Ok(Config {
@@ -180,6 +185,7 @@ impl Config {
             jwt_secret_generated,
             jwt_expires_in,
             google_client_ids,
+            google_jwks_url,
             storage,
         })
     }

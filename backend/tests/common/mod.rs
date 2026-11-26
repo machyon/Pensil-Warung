@@ -82,6 +82,7 @@ impl TestApp {
             pool: pool.clone(),
             config: config.clone(),
             perms: Arc::default(),
+            google_keys: Arc::default(),
         };
 
         // Built before the migrations, so a failure below still drops the database.
