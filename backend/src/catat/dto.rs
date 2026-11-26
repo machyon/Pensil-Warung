@@ -14,6 +14,7 @@ use uuid::Uuid;
 use crate::common::names::{name_key, normalize_product_name};
 use crate::common::validate::{MAX_QUANTITY, whole_quantity};
 use crate::error::{AppError, ErrorCode};
+use crate::transactions::dto::TransactionResponse;
 
 const MAX_OPS: usize = 200;
 const MAX_RAW_TEXT_CHARS: usize = 20_000;
@@ -90,6 +91,22 @@ impl LineError {
 /// 422 `lines_invalid` with `details.lines: [{line_no, code, message}]`.
 pub fn lines_invalid(lines: &[LineError]) -> AppError {
     AppError::new(ErrorCode::LinesInvalid).with_details(json!({ "lines": lines }))
+}
+
+/// A product touched by a batch, with its stock now.
+#[derive(Debug, Serialize)]
+pub struct ProductStock {
+    pub id: i64,
+    pub name: String,
+    pub stock: i64,
+}
+
+/// The `POST /catat` response body.
+#[derive(Serialize)]
+pub struct CatatResponse {
+    pub transaction: Option<TransactionResponse>,
+    pub products_changed: Vec<ProductStock>,
+    pub products_deleted: Vec<i64>,
 }
 
 /// A validated line. Product references are `name_key`s (lowercase, single
