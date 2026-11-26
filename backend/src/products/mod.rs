@@ -7,6 +7,7 @@
 //! inserts movements for everything else.
 
 pub mod dto;
+pub mod handlers;
 
 use rust_decimal::Decimal;
 use time::OffsetDateTime;
@@ -141,6 +142,47 @@ pub async fn find_by_name(
         )
         .await?;
     Ok(row.as_ref().map(Product::from))
+}
+
+pub async fn get(client: &impl GenericClient, user_id: Uuid, id: i64) -> AppResult<Product> {
+    let row = client
+        .query_opt(
+            &format!("SELECT {COLUMNS} FROM products WHERE id = $1 AND user_id = $2"),
+            &[&id, &user_id],
+        )
+        .await?
+        .ok_or_else(AppError::not_found)?;
+    Ok(Product::from(&row))
+}
+
+/// All of the user's products by name, optionally filtered by a case-insensitive
+/// substring of the name (`%`, `_` and `\` in `q` match literally).
+pub async fn list(
+    client: &impl GenericClient,
+    user_id: Uuid,
+    q: Option<&str>,
+) -> AppResult<Vec<Product>> {
+    let pattern = q
+        .map(normalize_product_name)
+        .filter(|q| !q.is_empty())
+        .map(|q| {
+            let escaped = q
+                .replace('\\', "\\\\")
+                .replace('%', "\\%")
+                .replace('_', "\\_");
+            format!("%{escaped}%")
+        });
+    let rows = client
+        .query(
+            &format!(
+                "SELECT {COLUMNS} FROM products
+                 WHERE user_id = $1 AND ($2::text IS NULL OR name ILIKE $2)
+                 ORDER BY lower(name), id"
+            ),
+            &[&user_id, &pattern],
+        )
+        .await?;
+    Ok(rows.iter().map(Product::from).collect())
 }
 
 #[cfg(test)]
