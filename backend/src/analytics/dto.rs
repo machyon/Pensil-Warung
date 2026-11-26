@@ -46,3 +46,29 @@ pub struct MonthSummary {
     pub weekday_avg: Option<Vec<WeekdayAvg>>,
     pub top_items: Vec<TopItem>,
 }
+
+#[derive(Serialize)]
+pub struct DaySales {
+    /// "YYYY-MM-DD" (WIB).
+    pub day: String,
+    pub transaction_count: i64,
+    pub revenue: i64,
+}
+
+#[derive(Serialize)]
+pub struct DayItem {
+    pub product_id: Option<i64>,
+    pub name: String,
+    pub qty: i64,
+    pub revenue: i64,
+}
+
+#[derive(Serialize)]
+pub struct DayItems {
+    /// Top 3 by quantity, then revenue.
+    pub items: Vec<DayItem>,
+    /// `total` minus the revenue of `items`.
+    pub other_revenue: i64,
+    /// Revenue of the whole day.
+    pub total: i64,
+}

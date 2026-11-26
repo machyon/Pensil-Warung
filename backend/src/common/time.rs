@@ -61,6 +61,18 @@ pub fn resolve_month(param: Option<&str>) -> AppResult<Month> {
     Ok(month)
 }
 
+/// The `{date}` path value: `YYYY-MM-DD`, not after today (WIB); otherwise
+/// 422 `invalid_value` on `date`.
+pub fn resolve_day(s: &str) -> AppResult<Date> {
+    let bad = |m: &'static str| AppError::validation(ErrorCode::InvalidValue, "date", m);
+    let day = Date::parse(s, format_description!("[year]-[month]-[day]"))
+        .map_err(|_| bad("Tanggal harus berformat YYYY-MM-DD."))?;
+    if day > today_wib() {
+        return Err(bad("Tanggal tidak boleh di masa depan."));
+    }
+    Ok(day)
+}
+
 /// `[1st 00:00 WIB, next 1st 00:00 WIB)`.
 pub fn month_bounds(month: Month) -> (OffsetDateTime, OffsetDateTime) {
     (wib_day_bounds(month).0, wib_day_bounds(next_month(month)).0)

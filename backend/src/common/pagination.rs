@@ -3,7 +3,8 @@
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use serde::Serialize;
-use time::OffsetDateTime;
+use time::macros::format_description;
+use time::{Date, OffsetDateTime};
 
 use crate::error::{AppError, ErrorCode};
 
@@ -44,6 +45,19 @@ impl Cursor {
     }
 }
 
+/// Cursor of a day-keyed list: the last day returned, as "YYYY-MM-DD".
+pub fn encode_day(day: impl std::fmt::Display) -> String {
+    URL_SAFE_NO_PAD.encode(day.to_string())
+}
+
+/// A malformed cursor is 422 `invalid_value` on field `cursor`.
+pub fn decode_day(s: &str) -> Result<Date, AppError> {
+    let bad = || AppError::validation(ErrorCode::InvalidValue, "cursor", "Cursor tidak valid.");
+    let raw = URL_SAFE_NO_PAD.decode(s).map_err(|_| bad())?;
+    let raw = String::from_utf8(raw).map_err(|_| bad())?;
+    Date::parse(&raw, format_description!("[year]-[month]-[day]")).map_err(|_| bad())
+}
+
 #[derive(Serialize)]
 pub struct Page<T> {
     pub items: Vec<T>,
@@ -53,11 +67,16 @@ pub struct Page<T> {
 impl<T> Page<T> {
     /// `rows` were fetched with `LIMIT limit + 1`: an extra row means there is
     /// a next page, and the cursor points at the last row that is kept.
-    pub fn new(mut rows: Vec<T>, limit: i64, key: impl Fn(&T) -> Cursor) -> Self {
+    pub fn new(rows: Vec<T>, limit: i64, key: impl Fn(&T) -> Cursor) -> Self {
+        Self::with_key(rows, limit, |r| key(r).encode())
+    }
+
+    /// Like `new` for a cursor that is not a `Cursor`, given as its encoded form.
+    pub fn with_key(mut rows: Vec<T>, limit: i64, key: impl Fn(&T) -> String) -> Self {
         let limit = limit as usize;
         let next_cursor = (rows.len() > limit).then(|| {
             rows.truncate(limit);
-            key(&rows[limit - 1]).encode()
+            key(&rows[limit - 1])
         });
         Page {
             items: rows,
@@ -93,6 +112,14 @@ mod tests {
             let err = Cursor::decode(bad).unwrap_err();
             assert_eq!(err.code(), ErrorCode::InvalidValue, "{bad}");
         }
+    }
+
+    #[test]
+    fn day_cursor_round_trips_and_rejects_junk() {
+        let d = time::macros::date!(2026 - 11 - 17);
+        assert_eq!(decode_day(&encode_day(d)).unwrap(), d);
+        assert!(decode_day("!!!").is_err());
+        assert!(decode_day(&URL_SAFE_NO_PAD.encode("2026-13-01")).is_err());
     }
 
     #[test]
