@@ -38,6 +38,7 @@ pub enum ErrorCode {
     StockInsufficient,
     NothingToUpdate,
     NotEditable,
+    AlreadyVoided,
     TimePassed,
     PayloadTooLarge,
     UnsupportedImage,
@@ -73,6 +74,7 @@ impl ErrorCode {
             ErrorCode::StockInsufficient => "stock_insufficient",
             ErrorCode::NothingToUpdate => "nothing_to_update",
             ErrorCode::NotEditable => "not_editable",
+            ErrorCode::AlreadyVoided => "already_voided",
             ErrorCode::TimePassed => "time_passed",
             ErrorCode::PayloadTooLarge => "payload_too_large",
             ErrorCode::UnsupportedImage => "unsupported_image",
@@ -148,6 +150,7 @@ impl ErrorCode {
                 "Tidak ada data yang diubah.",
             ),
             ErrorCode::NotEditable => (StatusCode::CONFLICT, "Data ini tidak dapat diubah."),
+            ErrorCode::AlreadyVoided => (StatusCode::CONFLICT, "Transaksi ini sudah dibatalkan."),
             ErrorCode::TimePassed => (
                 StatusCode::UNPROCESSABLE_ENTITY,
                 "Waktu untuk tindakan ini sudah lewat.",
@@ -314,7 +317,7 @@ mod tests {
     use super::*;
     use axum::body::to_bytes;
 
-    const ALL: [ErrorCode; 29] = [
+    const ALL: [ErrorCode; 30] = [
         ErrorCode::InvalidBody,
         ErrorCode::InvalidQuery,
         ErrorCode::InvalidPath,
@@ -338,6 +341,7 @@ mod tests {
         ErrorCode::StockInsufficient,
         ErrorCode::NothingToUpdate,
         ErrorCode::NotEditable,
+        ErrorCode::AlreadyVoided,
         ErrorCode::TimePassed,
         ErrorCode::PayloadTooLarge,
         ErrorCode::UnsupportedImage,

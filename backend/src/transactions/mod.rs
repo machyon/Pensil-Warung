@@ -12,7 +12,7 @@ use tokio_postgres::{GenericClient, Row};
 use uuid::Uuid;
 
 use crate::common::pagination::Cursor;
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult, ErrorCode};
 use dto::{DaySummary, ItemResponse, TransactionListItem, TransactionResponse};
 
 /// Items named in a list row's `summary` before " +N lainnya".
@@ -66,6 +66,29 @@ pub async fn find(
     match row {
         Some(row) => Ok(Some(with_items(client, &row).await?)),
         None => Ok(None),
+    }
+}
+
+/// Voids a completed transaction (the DB trigger restores stock) and returns
+/// it. Not the user's: 404. Already voided: 409 `already_voided`.
+pub async fn void(
+    client: &impl GenericClient,
+    user_id: Uuid,
+    id: i64,
+    reason: Option<&str>,
+) -> AppResult<TransactionResponse> {
+    let n = client
+        .execute(
+            "UPDATE transactions
+                SET status = 'voided', voided_at = now(), void_reason = $3
+              WHERE id = $1 AND user_id = $2 AND status = 'completed'",
+            &[&id, &user_id, &reason],
+        )
+        .await?;
+    match find(client, user_id, id).await? {
+        None => Err(AppError::not_found()),
+        Some(_) if n == 0 => Err(AppError::new(ErrorCode::AlreadyVoided)),
+        Some(t) => Ok(t),
     }
 }
 
