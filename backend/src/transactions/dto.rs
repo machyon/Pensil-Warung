@@ -3,9 +3,10 @@
 
 use rust_decimal::prelude::ToPrimitive;
 use serde::Serialize;
-use time::OffsetDateTime;
+use time::{Date, OffsetDateTime};
 use tokio_postgres::Row;
 
+use crate::common::pagination::Cursor;
 use crate::products::dto::rfc3339;
 
 #[derive(Serialize)]
@@ -65,6 +66,54 @@ impl TransactionResponse {
                 .map(rfc3339),
             void_reason: row.get("void_reason"),
             items,
+        }
+    }
+}
+
+/// One row of the day list.
+#[derive(Serialize)]
+pub struct TransactionListItem {
+    pub id: i64,
+    pub occurred_at: String,
+    pub total: i64,
+    pub status: String,
+    pub item_count: i64,
+    pub summary: String,
+    #[serde(skip)]
+    pub cursor: Cursor,
+}
+
+impl TransactionListItem {
+    /// `row` columns: `id, occurred_at, total, status` (text).
+    pub fn new(row: &Row, item_count: i64, summary: String) -> Self {
+        let occurred_at: OffsetDateTime = row.get("occurred_at");
+        let id: i64 = row.get("id");
+        TransactionListItem {
+            id,
+            occurred_at: rfc3339(occurred_at),
+            total: row.get("total"),
+            status: row.get("status"),
+            item_count,
+            summary,
+            cursor: Cursor { occurred_at, id },
+        }
+    }
+}
+
+/// Completed sales of the listed day.
+#[derive(Serialize)]
+pub struct DaySummary {
+    pub date: String,
+    pub transaction_count: i64,
+    pub revenue: i64,
+}
+
+impl DaySummary {
+    pub fn new(date: Date, transaction_count: i64, revenue: i64) -> Self {
+        DaySummary {
+            date: date.to_string(),
+            transaction_count,
+            revenue,
         }
     }
 }
