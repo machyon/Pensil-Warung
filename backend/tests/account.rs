@@ -198,3 +198,68 @@ async fn email_google_only_is_403() {
     assert_eq!(res.status, StatusCode::FORBIDDEN);
     assert_eq!(res.json["error"]["code"], "google_account");
 }
+
+#[tokio::test]
+async fn password_change_works_for_login() {
+    let (app, token) = app_with_siti().await;
+    let res = app
+        .put_json(
+            "/api/v1/me/password",
+            Some(&token),
+            &json!({"current_password": "rahasia123", "new_password": "sandi-baru-456"}),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::NO_CONTENT, "{}", res.text);
+    let login = |pw: &str| json!({"email": "siti@example.com", "password": pw});
+    let old = app
+        .post_json("/api/v1/auth/login", None, &login("rahasia123"))
+        .await;
+    assert_eq!(old.status, StatusCode::UNAUTHORIZED);
+    let new = app
+        .post_json("/api/v1/auth/login", None, &login("sandi-baru-456"))
+        .await;
+    assert_eq!(new.status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn password_wrong_current_is_401() {
+    let (app, token) = app_with_siti().await;
+    let res = app
+        .put_json(
+            "/api/v1/me/password",
+            Some(&token),
+            &json!({"current_password": "salah-banget", "new_password": "sandi-baru-456"}),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(res.json["error"]["code"], "invalid_credentials");
+}
+
+#[tokio::test]
+async fn password_too_short_is_422() {
+    let (app, token) = app_with_siti().await;
+    let res = app
+        .put_json(
+            "/api/v1/me/password",
+            Some(&token),
+            &json!({"current_password": "rahasia123", "new_password": "pendek"}),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(res.json["error"]["code"], "invalid_value");
+}
+
+#[tokio::test]
+async fn password_google_only_is_403() {
+    let app = TestApp::new().await;
+    let token = app.google_user("Budi", "budi@example.com").await;
+    let res = app
+        .put_json(
+            "/api/v1/me/password",
+            Some(&token),
+            &json!({"current_password": "apa-saja-123", "new_password": "sandi-baru-456"}),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::FORBIDDEN);
+    assert_eq!(res.json["error"]["code"], "google_account");
+}

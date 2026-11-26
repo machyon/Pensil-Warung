@@ -2,17 +2,18 @@
 //! The PATCH routes return the updated user, the same shape as `GET /me`.
 
 use axum::extract::State;
-use axum::routing::{get, patch};
+use axum::routing::{get, patch, put};
 use axum::{Json, Router};
 use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::auth::extractor::AuthUser;
-use crate::auth::handlers::normalize_email;
+use crate::auth::handlers::{check_password_len, hash_blocking, normalize_email};
 use crate::auth::password::verify_password;
 use crate::auth::user::{UserResponse, load_user};
 use crate::common::extract::ApiJson;
 use crate::common::names::sanitize_display_name;
+use crate::common::response::NoContent;
 use crate::common::validate::max_len;
 use crate::error::{AppError, ErrorCode};
 use crate::state::AppState;
@@ -23,6 +24,7 @@ pub fn routes() -> Router<AppState> {
         .route("/me/username", patch(set_username))
         .route("/me/display-name", patch(set_display_name))
         .route("/me/email", patch(set_email))
+        .route("/me/password", put(set_password))
 }
 
 async fn me(State(state): State<AppState>, user: AuthUser) -> Result<Json<UserResponse>, AppError> {
@@ -167,4 +169,29 @@ async fn set_email(
         &email,
     )
     .await
+}
+
+#[derive(Deserialize)]
+struct PasswordBody {
+    current_password: String,
+    new_password: String,
+}
+
+async fn set_password(
+    State(state): State<AppState>,
+    user: AuthUser,
+    ApiJson(body): ApiJson<PasswordBody>,
+) -> Result<NoContent, AppError> {
+    check_password_len(&body.new_password)?;
+    let client = state.pool.get().await?;
+    check_current_password(&client, user.id, body.current_password).await?;
+    let hash = hash_blocking(body.new_password).await?;
+    client
+        .execute(
+            "UPDATE auth_identities SET password_hash = $1
+              WHERE user_id = $2 AND provider = 'password'",
+            &[&hash, &user.id],
+        )
+        .await?;
+    Ok(NoContent)
 }
