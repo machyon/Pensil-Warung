@@ -27,6 +27,7 @@ time = { version = "0.3.55", features = ["serde", "formatting", "parsing", "macr
 tokio = { version = "1.54.1", features = ["full"] }
 tokio-postgres = { version = "0.7.18", features = ["with-uuid-1", "with-time-0_3", "with-serde_json-1"] }
 tokio-postgres-rustls = "0.14.0"
+tower = { version = "0.5.3", features = ["util"] }
 tower-http = { version = "0.7.1", features = ["trace", "timeout", "limit", "request-id"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
@@ -35,4 +36,3 @@ webpki-roots = "1.0.12"
 
 [dev-dependencies]
 http-body-util = "0.1.5"
-tower = { version = "0.5.3", features = ["util"] }
