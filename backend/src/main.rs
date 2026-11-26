@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+mod common;
 mod config;
 mod db;
 mod error;
