@@ -1,9 +1,10 @@
 //! Broadcast JSON shapes.
 
 use serde::Serialize;
+use time::OffsetDateTime;
 use tokio_postgres::Row;
 
-use crate::products::dto::rfc3339;
+use crate::common::pagination::Page;
 
 #[derive(Serialize)]
 pub struct BroadcastItem {
@@ -12,7 +13,8 @@ pub struct BroadcastItem {
     pub title: String,
     pub summary: String,
     pub has_body: bool,
-    pub shown_at: String,
+    #[serde(with = "time::serde::rfc3339")]
+    pub shown_at: OffsetDateTime,
 }
 
 impl From<&Row> for BroadcastItem {
@@ -24,7 +26,7 @@ impl From<&Row> for BroadcastItem {
             title: r.get("title"),
             summary: r.get("summary"),
             has_body: r.get("has_body"),
-            shown_at: rfc3339(r.get("shown_at")),
+            shown_at: r.get("shown_at"),
         }
     }
 }
@@ -44,4 +46,11 @@ impl From<&Row> for BroadcastWithBody {
             body: r.get("body"),
         }
     }
+}
+
+#[derive(Serialize)]
+pub struct BroadcasterList {
+    pub recipient_count: i64,
+    pub scheduled: Vec<BroadcastItem>,
+    pub sent: Page<BroadcastItem>,
 }
