@@ -47,20 +47,24 @@ The default status and message come from `backend/src/error.rs`. "Used" says whe
 | `invalid_body` | 400 | Isi permintaan tidak valid. | now | Malformed JSON, wrong shape, or missing JSON content type |
 | `invalid_query` | 400 | Parameter permintaan tidak valid. | now | A query string value does not parse |
 | `invalid_path` | 400 | Alamat permintaan tidak valid. | now | A path parameter does not parse |
-| `invalid_value` | 422 | Nilai yang dimasukkan tidak valid. | now | A field fails a rule (email format, username format, password length, field too long, missing `current_password`, negative price or stock, `note` without `stock`, bulk size). A database check failure (other than stock) gives 422. An unknown unique index gives 409 with this code |
-| `invalid_name` | 422 | Nama yang dimasukkan tidak valid. | now | `PATCH /me/display-name`: empty after cleaning, or over 50 characters. Products: name empty or over 60 characters |
+| `invalid_value` | 422 | Nilai yang dimasukkan tidak valid. | now | A field fails a rule (email format, username format, password length, field too long, missing `current_password`, negative price or stock, `note` without `stock`, bulk size, `POST /catat` batch rules, a total too large). A database check failure (other than stock) gives 422. An unknown unique index gives 409 with this code |
+| `invalid_name` | 422 | Nama yang dimasukkan tidak valid. | now | `PATCH /me/display-name`: empty after cleaning, or over 50 characters. Products: name empty or over 60 characters. Also a line code in `lines_invalid` (`POST /catat`) |
+| `invalid_quantity` | 422 | Jumlah yang dimasukkan tidak valid. | now | Line code in `lines_invalid` (`POST /catat`): quantity is not a whole number from 1 to 999 999 999 |
+| `invalid_price` | 422 | Harga yang dimasukkan tidak valid. | now | Line code in `lines_invalid` (`POST /catat`): `create_product` price is not a whole number >= 0 |
+| `product_not_found` | 404 | Produk tidak ditemukan. | now | Line code in `lines_invalid` (`POST /catat`): no product of the user's has that name at that point in the batch. Never returned as a top-level error |
+| `lines_invalid` | 422 | Ada baris yang tidak valid. | now | `POST /catat`: one or more lines failed. `details.lines` lists every failure, and nothing is saved |
 | `not_found` | 404 | Data tidak ditemukan. | now | Unknown route, or the record does not exist |
 | `unauthorized` | 401 | Sesi Anda telah berakhir. Silakan masuk kembali. | now | Missing or invalid bearer token. `POST /auth/google` also returns it for a bad Google ID token, with the message "Token Google tidak valid." |
 | `invalid_credentials` | 401 | Email atau kata sandi salah. | now | Wrong email or password at login. Also a wrong `current_password` on the `/me` routes (message "Kata sandi saat ini salah.") |
-| `forbidden` | 403 | Anda tidak memiliki akses untuk tindakan ini. | now | Signed in, but the role lacks the permission (all `/products` routes need `product.manage`) |
+| `forbidden` | 403 | Anda tidak memiliki akses untuk tindakan ini. | now | Signed in, but the role lacks the permission (all `/products` routes need `product.manage`; `POST /catat` needs `transaction.create`, plus `product.manage` for non-sale ops) |
 | `account_gone` | 401 | Akun tidak ditemukan. Silakan masuk kembali. | now | The user no longer exists. A foreign key violation (SQLSTATE 23503) maps here |
 | `email_taken` | 409 | Email sudah digunakan. | now | Unique violation on `users.email` (register or `PATCH /me/email` with an existing email) |
 | `username_taken` | 409 | Username sudah digunakan. | now | Unique violation on `users.username` (`PATCH /me/username`). Register and Google sign-up retry once before this can surface |
-| `name_taken` | 409 | Nama produk sudah digunakan. | now | Unique violation on a product name for this user (create, bulk, rename). Bulk adds `details.index` |
+| `name_taken` | 409 | Nama produk sudah digunakan. | now | Unique violation on a product name for this user (create, bulk, rename). Bulk adds `details.index`. Also a line code in `lines_invalid` (`POST /catat`, 422) for a `create_product` whose name is taken |
 | `email_registered` | 409 | Email ini sudah terdaftar. Silakan masuk dengan kata sandi. | now | Google sign-in with an email that already has a password account |
 | `google_account` | 403 | Akun ini masuk dengan Google, sehingga tidak dapat diubah di sini. | now | Email or password change on a Google-only account |
 | `reauth_required` | 401 | Silakan verifikasi ulang akun Anda untuk melanjutkan. | now | `DELETE /me` for a Google-only account without a fresh matching Google ID token |
-| `stock_insufficient` | 422 | Stok tidak cukup. | SQL map | A stock movement would take stock below zero. Not reachable from `/products` (PATCH sets an absolute stock >= 0), reserved for Catat |
+| `stock_insufficient` | 422 | Stok tidak cukup. | now | Line code in `lines_invalid` (`POST /catat`): a sale or `adjust_down` would take stock below zero. Not reachable from `/products` (PATCH sets an absolute stock >= 0). A bare 422 with this code is only the SQL map for the same check |
 | `nothing_to_update` | 422 | Tidak ada data yang diubah. | now | `PATCH /products/{id}` with no fields |
 | `not_editable` | 409 | Data ini tidak dapat diubah. | later | The record cannot be changed in its current state |
 | `time_passed` | 422 | Waktu untuk tindakan ini sudah lewat. | later | The time window for an action has passed |
@@ -291,3 +295,100 @@ Errors: `invalid_body` (400, no `photo` field or bad multipart), `not_found` (40
 #### DELETE /api/v1/products/{id}/photo
 
 `204 No Content`. Idempotent: also 204 when the product has no photo. Errors: `not_found` (404), `storage_unavailable` (503).
+
+## Catat
+
+### POST /api/v1/catat
+
+One Simpan on the Catat screen: everything typed in the box is saved as one atomic batch (all lines, or nothing). Needs `transaction.create`, plus `product.manage` when the batch has any op that is not a `sale` (else `403 forbidden`, checked before any database work). Every lookup is scoped to the caller's own products.
+
+The client parses the typed text and sends structured ops. The server never parses text.
+
+Request:
+
+```json
+{
+  "client_uuid": "0193d5a0-7c1e-7a55-9b0e-3f6c1d2e4a10",
+  "raw_text": "nasi goreng 2\nes teh manis 3\ntambah stok kopi susu 10",
+  "ops": [
+    { "line_no": 1, "op": "sale", "product": "Nasi goreng", "quantity": 2 },
+    { "line_no": 2, "op": "sale", "product": "Es teh manis", "quantity": 3 },
+    { "line_no": 3, "op": "restock", "product": "Kopi susu", "quantity": 10 }
+  ]
+}
+```
+
+- `client_uuid`: a UUID made by the phone for this Simpan, used for retries (see Replay).
+- `raw_text`: exactly what was typed, stored as is on the transaction. Required, at most 20 000 characters.
+- `ops`: 1 to 200 lines, each with a unique `line_no`. They run in `line_no` order.
+- `occurred_at` is not accepted: the time is always the server's `now()`. Any unknown field (including a client price) is ignored.
+
+Ops (`product` is matched against the user's product names ignoring case and extra spaces):
+
+| `op` | Fields | Effect |
+|---|---|---|
+| `sale` | `product`, `quantity` | An item on the batch's one transaction. The price is always the product's current `price` |
+| `restock` | `product`, `quantity` | Stock movement `restock`, `+quantity`. No transaction |
+| `adjust_down` | `product`, `quantity` | Stock movement `adjustment`, `-quantity` (damaged or lost goods). No transaction |
+| `create_product` | `name`, `price`, `stock` | A new product. A `stock` above 0 gets an `initial` movement |
+| `delete_product` | `product` | Hard delete, plus the photo object. Past sale items keep their snapshot with `product_id: null` |
+
+`quantity`, `price` and `stock` are JSON integers. A decimal or out-of-range number is a line error (not a 400). A quantity is 1 to 999 999 999.
+
+Batch rules: a product created earlier in the batch can be used by later lines, and a product deleted earlier cannot. Restocks and creates earlier in the batch count toward later stock checks. The same product on two sale lines gives two items. All `sale` lines together make one transaction; with no sale line there is no transaction.
+
+Response `201 Created`:
+
+```json
+{
+  "transaction": {
+    "id": 12, "raw_text": "...", "total": 39000, "status": "completed",
+    "occurred_at": "2026-11-26T08:00:00Z", "voided_at": null, "void_reason": null,
+    "items": [
+      { "id": 30, "line_no": 1, "product_id": 5, "product_name": "Nasi goreng",
+        "unit_price": 15000, "quantity": 2, "line_total": 30000 }
+    ]
+  },
+  "products_changed": [ { "id": 5, "name": "Nasi goreng", "stock": 8 } ],
+  "products_deleted": [ 9 ]
+}
+```
+
+- `transaction` is `null` when the batch had no sale. Its shape is the transaction object that the transaction endpoints reuse.
+- `products_changed`: every product the batch touched (sold, restocked, adjusted or created) and that still exists, with its final stock, ordered by id. Use it to refresh the local stock.
+- `products_deleted`: ids of existing products the batch deleted. A product created and deleted in the same batch appears in neither list.
+
+Replay: if the user already has a transaction with this `client_uuid`, nothing is executed and the answer is `200 OK` with the stored transaction. `products_changed` then lists the products in that transaction's items that still exist, with their current stock (which may differ from the first answer), and `products_deleted` is `[]`. The ops in a replayed request are not compared with the stored ones. A concurrent duplicate is treated the same way.
+
+Command-only batches are not retry-safe: a batch with no `sale` line stores no transaction, so a retry with the same `client_uuid` runs again (a repeated restock adds the stock twice). This is accepted for now because there is no offline mode (see `docs/note.md`).
+
+Errors:
+
+- `403 forbidden`: missing `transaction.create`, or a non-sale op without `product.manage`.
+- `422 invalid_value` (with `details.field`): `ops` not 1 to 200 lines, `line_no` not unique, `raw_text` empty or too long.
+- `422 lines_invalid`: one or more lines are wrong. Every failing line is reported at once, and nothing is saved:
+
+```json
+{ "error": { "code": "lines_invalid", "message": "Ada baris yang tidak valid.",
+  "details": { "lines": [
+    { "line_no": 2, "code": "stock_insufficient", "message": "Stok tidak cukup." },
+    { "line_no": 3, "code": "product_not_found", "message": "Produk tidak ditemukan." }
+  ] } } }
+```
+
+  Line codes: `invalid_quantity`, `invalid_price`, `invalid_name`, `invalid_value`, `product_not_found`, `name_taken`, `stock_insufficient`.
+- `400 invalid_body`: malformed JSON, a missing field, or an unknown `op`.
+
+#### Command grammar (client side)
+
+One command per line, case-insensitive. The client checks the prefixes in this order and sends the matching op:
+
+| Typed line | Op |
+|---|---|
+| `tambah stok <name> <qty>` | `restock` |
+| `hapus stok <name> <qty>` | `adjust_down` |
+| `buat produk <name> harga <price> stok <stock>` | `create_product` |
+| `hapus <name>` | `delete_product` |
+| `<name> <qty>` | `sale` |
+
+Voiding a sale is not a command; it is a transaction endpoint.
