@@ -1,6 +1,6 @@
 # Pensil Warung: database
 
-Context for agents working on this repo. The schema lives in `backend/migrations/0001_init.sql` (PostgreSQL 18).
+Context for agents working on this repo. The schema lives in `backend/migrations/V1__init.sql` (PostgreSQL 18).
 
 ## What the app is
 Mobile sales notebook for small Indonesian warung owners (UI text is Indonesian). The owner types sales as plain text ("nasi goreng 2"); the app parses them into transactions and updates stock. There is also a separate broadcaster role that posts announcements to all users. Source design: the Hi-Fi page of the "Pensil Warung Onboarding" canvas. Light and dark screens are the same data.
@@ -22,7 +22,7 @@ Mobile sales notebook for small Indonesian warung owners (UI text is Indonesian)
 - `roles`, `permissions`, `role_permission`: plain id + name. Seeded: role 1 = user, 2 = broadcaster. `users.role_id` defaults to 1.
 - `users`: `email`, `display_name`, `username`, `role_id`.
 - `auth_identities`: one row per login method per user.
-- `products`: name (unique per user, case-insensitive), price, stock, optional photo.
+- `products`: name (unique per user, case-insensitive), price, stock, optional photo (`photo_key`, a Tigris object key; the API returns presigned URLs).
 - `transactions`: one "Simpan" = one transaction. Holds `raw_text`, `total`, `status` (completed or voided).
 - `transaction_items`: snapshot of name and price at sale time.
 - `stock_movements`: ledger of every stock change (initial, sale, void_sale, restock, adjustment).
@@ -45,13 +45,9 @@ Mobile sales notebook for small Indonesian warung owners (UI text is Indonesian)
 - Move scheduled broadcasts to `sent` and set `broadcasted_at` when due.
 
 ## Migrations
-Apply to an empty database, in one transaction:
+Run from `backend/` with `cargo run -- migrate`. Migrations are embedded by refinery. Each one runs in its own transaction, and applied versions are recorded in `refinery_schema_history`. Running it again does nothing.
 
-```sh
-psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 --single-transaction -f backend/migrations/0001_init.sql
-```
-
-Once a migration has been applied to a shared database, do not edit it; add a new numbered file.
+Once a migration has been applied to a shared database, do not edit it; add a new `V<n>__name.sql` file instead.
 
 ## Testing
-No test suite yet. Check the schema on a throwaway Postgres 18 (`initdb`, load `backend/migrations/0001_init.sql`, exercise sales, void, delete, names and broadcasts). Do the same after any change.
+Database tests are in `backend/tests/` (for example `tests/migrations.rs`). They create a throwaway Postgres 18 database per test. See `backend/README.md` for how to run them.
