@@ -180,3 +180,49 @@ async fn bad_or_future_month_is_422() {
     let j = get(&app, &t, "/month").await;
     assert_eq!(j["trend"].as_array().unwrap().len(), 12);
 }
+
+#[tokio::test]
+async fn weekday_avg_needs_14_sales_days_and_counts_empty_days() {
+    let app = TestApp::new().await;
+    let t = user_with_nasi(&app).await;
+    // Rp10.000 a day on 1..=13 March 2026 (1 Mar is a Sunday).
+    for day in 1..=13 {
+        sell_at(
+            &app,
+            &t,
+            &format!("2026-03-{day:02}T03:00:00Z"),
+            &[("Nasi goreng", 1)],
+        )
+        .await;
+    }
+    let j = get(&app, &t, "/month?month=2026-03").await;
+    assert_eq!(j["weekday_avg"], Value::Null);
+
+    sell_at(&app, &t, "2026-03-14T03:00:00Z", &[("Nasi goreng", 1)]).await;
+    let j = get(&app, &t, "/month?month=2026-03").await;
+    // Each weekday sold twice (Rp20.000) in days 1..=14. March has 5 Sun/Mon/Tue
+    // and 4 of the others, and the empty days after the 14th count as Rp0.
+    let avg: Vec<(i64, i64)> = j["weekday_avg"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|w| {
+            (
+                w["weekday"].as_i64().unwrap(),
+                w["avg_revenue"].as_i64().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        avg,
+        [
+            (1, 4000),
+            (2, 4000),
+            (3, 5000),
+            (4, 5000),
+            (5, 5000),
+            (6, 5000),
+            (7, 4000)
+        ]
+    );
+}

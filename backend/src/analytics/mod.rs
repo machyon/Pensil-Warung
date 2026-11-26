@@ -17,10 +17,12 @@ use crate::common::time::{
     through_day, today_wib,
 };
 use crate::error::AppResult;
-use dto::{MonthRevenue, MonthSummary, Previous, TopItem};
+use dto::{MonthRevenue, MonthSummary, Previous, TopItem, WeekdayAvg};
 
 const TREND_MONTHS: usize = 12;
 const TOP_ITEMS: i64 = 5;
+/// Days with sales a month needs before weekday averages mean anything.
+const MIN_SALES_DAYS: i64 = 14;
 
 /// Months with completed sales, newest first.
 pub async fn months(client: &impl GenericClient, user_id: Uuid) -> AppResult<Vec<MonthRevenue>> {
@@ -142,6 +144,40 @@ async fn top_items(
         .collect())
 }
 
+/// Average revenue per weekday over every calendar day 1..=`days` of `month`,
+/// days without sales counting as 0. `None` below `MIN_SALES_DAYS` days with sales.
+async fn weekday_avg(
+    client: &impl GenericClient,
+    user_id: Uuid,
+    month: Month,
+    days: u8,
+) -> AppResult<Option<Vec<WeekdayAvg>>> {
+    let last = month + Duration::days(i64::from(days) - 1);
+    let rows = client
+        .query(
+            "SELECT extract(isodow FROM d)::smallint AS weekday,
+                    round(COALESCE(sum(s.revenue), 0)::numeric / count(*))::bigint AS avg_revenue,
+                    count(s.day) AS sales_days
+               FROM generate_series($2::date, $3::date, interval '1 day') AS d
+               LEFT JOIN v_daily_sales s ON s.user_id = $1 AND s.day = d::date
+              GROUP BY 1 ORDER BY 1",
+            &[&user_id, &month, &last],
+        )
+        .await?;
+    let sales_days: i64 = rows.iter().map(|r| r.get::<_, i64>("sales_days")).sum();
+    if sales_days < MIN_SALES_DAYS {
+        return Ok(None);
+    }
+    Ok(Some(
+        rows.iter()
+            .map(|r| WeekdayAvg {
+                weekday: r.get("weekday"),
+                avg_revenue: r.get("avg_revenue"),
+            })
+            .collect(),
+    ))
+}
+
 /// The month summary: days 1..=`through_day` against the same days of the
 /// previous month, the 12-month trend and the best sellers.
 pub async fn summary(
@@ -164,7 +200,7 @@ pub async fn summary(
             change_pct: change_pct(revenue, prev_revenue),
         },
         trend: trend(client, user_id, month).await?,
-        weekday_avg: None,
+        weekday_avg: weekday_avg(client, user_id, month, through).await?,
         top_items: top_items(client, user_id, month, through).await?,
     })
 }
