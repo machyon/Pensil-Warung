@@ -376,3 +376,40 @@ async fn broadcaster_cannot_read_or_void_transactions() {
     let res = app.get(&format!("{URL}/{id}"), Some(&t)).await;
     assert_eq!(res.json["status"], "completed");
 }
+
+#[tokio::test]
+async fn void_accepts_an_empty_body_and_rejects_bad_json() {
+    use axum::body::Body;
+    use axum::http::{Method, Request};
+    let app = TestApp::new().await;
+    let t = app
+        .register("Siti", "siti@example.com", "password123")
+        .await;
+    product(&app, &t, "Kopi", 5000, 10).await;
+    let a = sell(&app, &t, &[("Kopi", 1)]).await;
+    let b = sell(&app, &t, &[("Kopi", 1)]).await;
+    let post = |id: i64, ct: Option<&str>, body: &str| {
+        let mut r = Request::builder()
+            .method(Method::POST)
+            .uri(format!("{URL}/{id}/void"))
+            .header("authorization", format!("Bearer {t}"));
+        if let Some(ct) = ct {
+            r = r.header("content-type", ct);
+        }
+        r.body(Body::from(body.to_owned())).unwrap()
+    };
+
+    for bad in [
+        (Some("application/json"), "{oops"),
+        (Some("text/plain"), "hello"),
+    ] {
+        let res = app.send(post(a, bad.0, bad.1)).await;
+        assert_eq!(res.status, StatusCode::BAD_REQUEST, "{}", res.text);
+        assert_eq!(res.json["error"]["code"], "invalid_body");
+    }
+    let res = app.send(post(a, None, "")).await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.text);
+    assert!(res.json["void_reason"].is_null());
+    let res = app.send(post(b, Some("application/json"), "")).await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.text);
+}

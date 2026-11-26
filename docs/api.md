@@ -430,7 +430,7 @@ One calendar day of the caller's transactions, newest first. Days are Asia/Jakar
 
 ### POST /api/v1/transactions/{id}/void
 
-Request (send `{}` for no reason):
+Request body is optional: no body (or an empty one) means no reason. A body with content must be valid JSON, else `400 invalid_body`.
 
 ```json
 { "reason": "salah catat" }
