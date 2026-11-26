@@ -47,7 +47,7 @@ The default status and message come from `backend/src/error.rs`. "Used" says whe
 | `invalid_body` | 400 | Isi permintaan tidak valid. | now | Malformed JSON, wrong shape, or missing JSON content type |
 | `invalid_query` | 400 | Parameter permintaan tidak valid. | now | A query string value does not parse |
 | `invalid_path` | 400 | Alamat permintaan tidak valid. | now | A path parameter does not parse |
-| `invalid_value` | 422 | Nilai yang dimasukkan tidak valid. | now | A field fails a rule (email format, username format, password length, field too long, missing `current_password`, negative price or stock, `note` without `stock`, bulk size, `POST /catat` batch rules, a total too large). A database check failure (other than stock) gives 422. An unknown unique index gives 409 with this code |
+| `invalid_value` | 422 | Nilai yang dimasukkan tidak valid. | now | A field fails a rule (`GET /transactions` `date` or `cursor`, void `reason`, email format, username format, password length, field too long, missing `current_password`, negative price or stock, `note` without `stock`, bulk size, `POST /catat` batch rules, a total too large). A database check failure (other than stock) gives 422. An unknown unique index gives 409 with this code |
 | `invalid_name` | 422 | Nama yang dimasukkan tidak valid. | now | `PATCH /me/display-name`: empty after cleaning, or over 50 characters. Products: name empty or over 60 characters. Also a line code in `lines_invalid` (`POST /catat`) |
 | `invalid_quantity` | 422 | Jumlah yang dimasukkan tidak valid. | now | Line code in `lines_invalid` (`POST /catat`): quantity is not a whole number from 1 to 999 999 999 |
 | `invalid_price` | 422 | Harga yang dimasukkan tidak valid. | now | Line code in `lines_invalid` (`POST /catat`): `create_product` price is not a whole number >= 0 |
@@ -56,7 +56,7 @@ The default status and message come from `backend/src/error.rs`. "Used" says whe
 | `not_found` | 404 | Data tidak ditemukan. | now | Unknown route, or the record does not exist |
 | `unauthorized` | 401 | Sesi Anda telah berakhir. Silakan masuk kembali. | now | Missing or invalid bearer token. `POST /auth/google` also returns it for a bad Google ID token, with the message "Token Google tidak valid." |
 | `invalid_credentials` | 401 | Email atau kata sandi salah. | now | Wrong email or password at login. Also a wrong `current_password` on the `/me` routes (message "Kata sandi saat ini salah.") |
-| `forbidden` | 403 | Anda tidak memiliki akses untuk tindakan ini. | now | Signed in, but the role lacks the permission (all `/products` routes need `product.manage`; `POST /catat` needs `transaction.create`, plus `product.manage` for non-sale ops) |
+| `forbidden` | 403 | Anda tidak memiliki akses untuk tindakan ini. | now | Signed in, but the role lacks the permission (all `/products` routes need `product.manage`; `POST /catat` needs `transaction.create`, plus `product.manage` for non-sale ops; the `/transactions` reads need `transaction.read` and void needs `transaction.void`) |
 | `account_gone` | 401 | Akun tidak ditemukan. Silakan masuk kembali. | now | The user no longer exists. A foreign key violation (SQLSTATE 23503) maps here |
 | `email_taken` | 409 | Email sudah digunakan. | now | Unique violation on `users.email` (register or `PATCH /me/email` with an existing email) |
 | `username_taken` | 409 | Username sudah digunakan. | now | Unique violation on `users.username` (`PATCH /me/username`). Register and Google sign-up retry once before this can surface |
@@ -66,6 +66,7 @@ The default status and message come from `backend/src/error.rs`. "Used" says whe
 | `reauth_required` | 401 | Silakan verifikasi ulang akun Anda untuk melanjutkan. | now | `DELETE /me` for a Google-only account without a fresh matching Google ID token |
 | `stock_insufficient` | 422 | Stok tidak cukup. | now | Line code in `lines_invalid` (`POST /catat`): a sale or `adjust_down` would take stock below zero. Not reachable from `/products` (PATCH sets an absolute stock >= 0). A bare 422 with this code is only the SQL map for the same check |
 | `nothing_to_update` | 422 | Tidak ada data yang diubah. | now | `PATCH /products/{id}` with no fields |
+| `already_voided` | 409 | Transaksi ini sudah dibatalkan. | now | `POST /transactions/{id}/void` on a transaction that is already voided |
 | `not_editable` | 409 | Data ini tidak dapat diubah. | later | The record cannot be changed in its current state |
 | `time_passed` | 422 | Waktu untuk tindakan ini sudah lewat. | later | The time window for an action has passed |
 | `payload_too_large` | 413 | Ukuran berkas terlalu besar. | now | Body is over the limit, or the `photo` file is over 5 MB (`PUT /products/{id}/photo`). The message says "berkas" (file) even for JSON |
@@ -392,3 +393,53 @@ One command per line, case-insensitive. The client checks the prefixes in this o
 | `<name> <qty>` | `sale` |
 
 Voiding a sale is not a command; it is a transaction endpoint.
+
+## Transactions
+
+Needs `transaction.read` (list, detail) or `transaction.void` (void), else `403 forbidden`. Every route only sees the caller's own transactions; another user's id is `404 not_found`. Transactions are created by `POST /catat` and are never deleted, only voided.
+
+### GET /api/v1/transactions?date=&cursor=&limit=
+
+One calendar day of the caller's transactions, newest first. Days are Asia/Jakarta (WIB, UTC+07:00): `date=2026-11-17` covers `2026-11-16T17:00:00Z` up to, not including, `2026-11-17T17:00:00Z`.
+
+- `date`: `YYYY-MM-DD`, default today in WIB. A bad date is `422 invalid_value` with `details.field` `date`.
+- `limit`: 1 to 100, default 20. Out-of-range values are clamped.
+- `cursor`: the `next_cursor` of the previous page. It is opaque: pass it back unchanged with the same `date`. A bad cursor is `422 invalid_value` with `details.field` `cursor`.
+
+`200 OK`
+
+```json
+{
+  "items": [
+    { "id": 12, "occurred_at": "2026-11-17T08:00:00Z", "total": 54000, "status": "completed",
+      "item_count": 4, "summary": "Nasi goreng 2, Es teh manis 3, Kopi 1 +1 lainnya" }
+  ],
+  "next_cursor": "MTc5NDU1MDAwMDAwMDAwMDoxMg",
+  "day": { "date": "2026-11-17", "transaction_count": 38, "revenue": 1250000 }
+}
+```
+
+- Paging is keyset on `(occurred_at, id)` descending, so rows added or voided while paging never cause a duplicate. `next_cursor` is `null` on the last page.
+- `day` counts completed sales only, for the whole day (not just this page). It is sent on the first page (no `cursor`) and is `null` on later pages.
+- Voided transactions are listed with `status: "voided"`; they are not counted in `day`.
+- `item_count` is the number of lines. `summary` names the first 3 lines in `line_no` order as "name quantity", joined by ", ", then " +N lainnya" when there are more.
+
+### GET /api/v1/transactions/{id}
+
+`200 OK` with the transaction object (the same shape as `transaction` in `POST /catat`): `id`, `raw_text`, `total`, `status` (`completed` or `voided`), `occurred_at`, `voided_at`, `void_reason` and `items[]`. Errors: `not_found` (404).
+
+### POST /api/v1/transactions/{id}/void
+
+Request body is optional: no body (or an empty one) means no reason. A body with content must be valid JSON, else `400 invalid_body`.
+
+```json
+{ "reason": "salah catat" }
+```
+
+- `reason` is optional, trimmed, and a blank value counts as none. At most 200 characters, else `422 invalid_value` with `details.field` `reason`.
+- `200 OK` with the updated transaction (`status: "voided"`, `voided_at`, `void_reason`).
+- Stock is restored: each item adds a `void_sale` stock movement for its product, unless the product has since been deleted.
+- A sale can be voided at any time, with no window. Voiding an old sale changes the totals of its day and month in past analytics.
+- Voiding is final; there is no un-void.
+
+Errors: `not_found` (404, no such transaction for this user), `already_voided` (409), `invalid_value` (422), `forbidden` (403).
