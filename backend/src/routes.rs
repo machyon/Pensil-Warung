@@ -35,7 +35,8 @@ fn api_routes() -> Router<AppState> {
         .route("/health/db", get(health_db))
         .merge(crate::auth::handlers::routes())
         .merge(crate::account::handlers::routes())
-        .merge(crate::products::handlers::routes());
+        .merge(crate::products::handlers::routes())
+        .merge(crate::catat::handlers::routes());
     Router::new()
         .route("/health", get(health))
         .nest("/api/v1", v1)

@@ -4,6 +4,7 @@
 
 pub mod dto;
 pub mod exec;
+pub mod handlers;
 pub mod plan;
 
 use rust_decimal::Decimal;
