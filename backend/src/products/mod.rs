@@ -15,7 +15,7 @@ use tokio_postgres::{GenericClient, Row};
 use uuid::Uuid;
 
 use crate::common::names::{name_key, normalize_product_name};
-use crate::common::validate::non_negative_money;
+use crate::common::validate::{max_len, non_negative_money};
 use crate::error::{AppError, AppResult, ErrorCode};
 
 const COLUMNS: &str = "id, name, price, stock, created_at, updated_at";
@@ -75,6 +75,46 @@ impl NewProduct {
     }
 }
 
+/// A validated PATCH: at least one field, normalized name, `note` only with `stock`.
+pub struct ProductPatch {
+    name: Option<String>,
+    price: Option<i64>,
+    stock: Option<Decimal>,
+    note: Option<String>,
+}
+
+impl ProductPatch {
+    pub fn new(
+        name: Option<&str>,
+        price: Option<i64>,
+        stock: Option<i64>,
+        note: Option<&str>,
+    ) -> AppResult<Self> {
+        if name.is_none() && price.is_none() && stock.is_none() && note.is_none() {
+            return Err(AppError::new(ErrorCode::NothingToUpdate));
+        }
+        if note.is_some() && stock.is_none() {
+            return Err(AppError::validation(
+                ErrorCode::InvalidValue,
+                "note",
+                "note hanya bisa dikirim bersama stock.",
+            ));
+        }
+        // Reuse the create rules; the placeholders for omitted fields always pass.
+        let checked = NewProduct::new(name.unwrap_or("x"), price.unwrap_or(0), stock.unwrap_or(0))?;
+        let note = note.map(str::trim).filter(|n| !n.is_empty());
+        if let Some(n) = note {
+            max_len("note", n, 200)?;
+        }
+        Ok(ProductPatch {
+            name: name.map(|_| checked.name),
+            price,
+            stock: stock.map(|_| checked.stock),
+            note: note.map(str::to_owned),
+        })
+    }
+}
+
 /// Inserts a product. A duplicate name is 409 `name_taken` (mapped from the
 /// unique index). A stock above 0 gets its `initial` movement from the trigger.
 pub async fn create(
@@ -92,6 +132,46 @@ pub async fn create(
         )
         .await?;
     Ok(Product::from(&row))
+}
+
+/// Changes a product's name, price and/or stock in one transaction. `stock` is
+/// the new absolute stock: the difference becomes a `restock` or `adjustment`
+/// movement (none when unchanged, so `note` is dropped). 404 if not the user's.
+pub async fn update(
+    client: &mut impl GenericClient,
+    user_id: Uuid,
+    id: i64,
+    patch: &ProductPatch,
+) -> AppResult<Product> {
+    let tx = client.transaction().await?;
+    let row = tx
+        .query_opt(
+            "SELECT stock FROM products WHERE id = $1 AND user_id = $2 FOR UPDATE",
+            &[&id, &user_id],
+        )
+        .await?
+        .ok_or_else(AppError::not_found)?;
+    let current: Decimal = row.get(0);
+    tx.execute(
+        "UPDATE products SET name = COALESCE($3, name), price = COALESCE($4, price)
+         WHERE id = $1 AND user_id = $2",
+        &[&id, &user_id, &patch.name, &patch.price],
+    )
+    .await?;
+    if let Some(stock) = patch.stock {
+        let delta = stock - current;
+        if !delta.is_zero() {
+            let reason = if delta > Decimal::ZERO {
+                "restock"
+            } else {
+                "adjustment"
+            };
+            move_stock(&tx, id, delta, reason, patch.note.as_deref()).await?;
+        }
+    }
+    let product = get(&tx, user_id, id).await?;
+    tx.commit().await?;
+    Ok(product)
 }
 
 /// Deletes one of the user's products (movements cascade, sale snapshots stay).
@@ -199,5 +279,18 @@ mod tests {
         assert!(NewProduct::new(&"a".repeat(60), 0, 0).is_ok());
         assert!(NewProduct::new("x", -1, 0).is_err());
         assert!(NewProduct::new("x", 1, -1).is_err());
+    }
+
+    #[test]
+    fn patch_rules() {
+        assert!(ProductPatch::new(None, None, None, None).is_err());
+        assert!(ProductPatch::new(None, None, None, Some("n")).is_err());
+        assert!(ProductPatch::new(Some(" "), None, None, None).is_err());
+        assert!(ProductPatch::new(None, Some(-1), None, None).is_err());
+        assert!(ProductPatch::new(None, None, Some(-1), None).is_err());
+        assert!(ProductPatch::new(None, None, Some(1), Some(&"a".repeat(201))).is_err());
+        let p = ProductPatch::new(Some(" A  b "), None, Some(2), Some(" ok ")).unwrap();
+        assert_eq!(p.name.as_deref(), Some("A b"));
+        assert_eq!(p.note.as_deref(), Some("ok"));
     }
 }

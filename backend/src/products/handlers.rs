@@ -10,7 +10,7 @@ use serde_json::json;
 use std::collections::HashSet;
 
 use super::dto::ProductResponse;
-use super::{NewProduct, create, get as get_product, list};
+use super::{NewProduct, ProductPatch, create, get as get_product, list, update};
 use crate::auth::extractor::AuthUser;
 use crate::auth::perms::Perm;
 use crate::common::extract::{ApiJson, ApiPath, ApiQuery};
@@ -23,7 +23,7 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/products", get(list_products).post(create_one))
         .route("/products/bulk", post(create_bulk))
-        .route("/products/{id}", get(get_one))
+        .route("/products/{id}", get(get_one).patch(patch_one))
 }
 
 #[derive(Deserialize)]
@@ -63,6 +63,34 @@ async fn get_one(
     state.perms.require(&user, Perm::ProductManage)?;
     let client = state.pool.get().await?;
     Ok(Json(get_product(&**client, user.id, id).await?.into()))
+}
+
+/// All fields optional. `stock` is the new absolute stock (an integer).
+#[derive(Deserialize)]
+struct PatchBody {
+    name: Option<String>,
+    price: Option<i64>,
+    stock: Option<i64>,
+    note: Option<String>,
+}
+
+async fn patch_one(
+    State(state): State<AppState>,
+    user: AuthUser,
+    ApiPath(id): ApiPath<i64>,
+    ApiJson(body): ApiJson<PatchBody>,
+) -> Result<Json<ProductResponse>, AppError> {
+    state.perms.require(&user, Perm::ProductManage)?;
+    let patch = ProductPatch::new(
+        body.name.as_deref(),
+        body.price,
+        body.stock,
+        body.note.as_deref(),
+    )?;
+    let mut client = state.pool.get().await?;
+    Ok(Json(
+        update(&mut **client, user.id, id, &patch).await?.into(),
+    ))
 }
 
 /// `stock` is an integer: a decimal such as 1.5 is rejected as `invalid_body`.
