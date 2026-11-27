@@ -1,5 +1,6 @@
 //! `/me` endpoints. Every query is scoped to the authenticated user's id.
-//! The PATCH routes return the updated user, the same shape as `GET /me`.
+//! The PATCH routes return the updated user, the same shape as `GET /me`;
+//! `/me/email` and `/me/password` return the login body with a fresh token.
 
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -10,7 +11,9 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::auth::extractor::AuthUser;
-use crate::auth::handlers::{check_password_len, hash_blocking, normalize_email};
+use crate::auth::handlers::{
+    AuthResponse, check_password_len, hash_blocking, normalize_email, token_for,
+};
 use crate::auth::password::verify_password;
 use crate::auth::user::{UserResponse, load_user};
 use crate::common::extract::ApiJson;
@@ -151,7 +154,7 @@ async fn set_email(
     State(state): State<AppState>,
     user: AuthUser,
     ApiJson(body): ApiJson<EmailBody>,
-) -> Result<Json<UserResponse>, AppError> {
+) -> Result<Json<AuthResponse>, AppError> {
     let email = normalize_email(&body.email)?;
     max_len("email", &email, 254)?;
     if !email.contains('@') {
@@ -163,14 +166,27 @@ async fn set_email(
     }
     let client = state.pool.get().await?;
     check_current_password(&client, user.id, body.current_password).await?;
-    drop(client);
-    update_and_load(
-        &state,
-        user.id,
-        "UPDATE users SET email = $1, token_version = token_version + 1 WHERE id = $2",
-        &email,
-    )
-    .await
+    let row = client
+        .query_opt(
+            "UPDATE users SET email = $1, token_version = token_version + 1
+              WHERE id = $2 RETURNING token_version, role_id",
+            &[&email, &user.id],
+        )
+        .await?;
+    fresh_auth(&state, &client, user.id, row).await
+}
+
+/// The login body for a credential change: the token carries the bumped `token_version`.
+async fn fresh_auth(
+    state: &AppState,
+    client: &deadpool_postgres::Client,
+    id: Uuid,
+    row: Option<tokio_postgres::Row>,
+) -> Result<Json<AuthResponse>, AppError> {
+    let row = row.ok_or_else(|| AppError::new(ErrorCode::AccountGone))?;
+    let token = token_for(state, id, row.get("role_id"), row.get("token_version"))?;
+    let user = load_user(client, &state.perms, id).await?;
+    Ok(Json(AuthResponse { token, user }))
 }
 
 #[derive(Deserialize)]
@@ -183,21 +199,22 @@ async fn set_password(
     State(state): State<AppState>,
     user: AuthUser,
     ApiJson(body): ApiJson<PasswordBody>,
-) -> Result<NoContent, AppError> {
+) -> Result<Json<AuthResponse>, AppError> {
     check_password_len("new_password", &body.new_password)?;
     let client = state.pool.get().await?;
     check_current_password(&client, user.id, body.current_password).await?;
     let hash = hash_blocking(body.new_password).await?;
-    client
-        .execute(
+    let row = client
+        .query_opt(
             "WITH p AS (UPDATE auth_identities SET password_hash = $1
                           WHERE user_id = $2 AND provider = 'password' RETURNING 1)
              UPDATE users SET token_version = token_version + 1
-              WHERE id = $2 AND EXISTS (SELECT 1 FROM p)",
+              WHERE id = $2 AND EXISTS (SELECT 1 FROM p)
+          RETURNING token_version, role_id",
             &[&hash, &user.id],
         )
         .await?;
-    Ok(NoContent)
+    fresh_auth(&state, &client, user.id, row).await
 }
 
 /// A Google token older than this (or issued this far in the future) is not a fresh sign-in.

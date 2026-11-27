@@ -185,7 +185,7 @@ async fn email_changes_with_correct_password_and_is_normalized() {
         )
         .await;
     assert_eq!(res.status, StatusCode::OK, "{}", res.text);
-    assert_eq!(res.json["email"], "baru@example.com");
+    assert_eq!(res.json["user"]["email"], "baru@example.com");
     let login = app
         .post_json(
             "/api/v1/auth/login",
@@ -266,7 +266,7 @@ async fn password_change_works_for_login() {
             &json!({"current_password": "rahasia123", "new_password": "sandi-baru-456"}),
         )
         .await;
-    assert_eq!(res.status, StatusCode::NO_CONTENT, "{}", res.text);
+    assert_eq!(res.status, StatusCode::OK, "{}", res.text);
     let login = |pw: &str| json!({"email": "siti@example.com", "password": pw});
     let old = app
         .post_json("/api/v1/auth/login", None, &login("rahasia123"))
@@ -434,6 +434,15 @@ async fn assert_revoked(app: &TestApp, token: &str) {
     assert_eq!(res.json["error"]["code"], "unauthorized");
 }
 
+async fn assert_returned_token_works(app: &TestApp, res: &common::TestResponse) {
+    let token = res.json["token"].as_str().unwrap();
+    assert!(res.json["user"]["id"].is_string());
+    assert_eq!(
+        app.get("/api/v1/me", Some(token)).await.status,
+        StatusCode::OK
+    );
+}
+
 #[tokio::test]
 async fn email_change_revokes_every_older_token() {
     let (app, token) = app_with_siti().await;
@@ -449,6 +458,7 @@ async fn email_change_revokes_every_older_token() {
     assert_eq!(res.status, StatusCode::OK, "{}", res.text);
     assert_revoked(&app, &token).await;
     assert_revoked(&app, &device2).await;
+    assert_returned_token_works(&app, &res).await;
     let fresh = login(&app, "baru@example.com", "rahasia123").await;
     assert_eq!(
         app.get("/api/v1/me", Some(&fresh)).await.status,
@@ -472,9 +482,10 @@ async fn password_change_revokes_every_older_token() {
             &json!({"current_password": "rahasia123", "new_password": "sandi-baru-456"}),
         )
         .await;
-    assert_eq!(res.status, StatusCode::NO_CONTENT, "{}", res.text);
+    assert_eq!(res.status, StatusCode::OK, "{}", res.text);
     assert_revoked(&app, &token).await;
     assert_revoked(&app, &device2).await;
+    assert_returned_token_works(&app, &res).await;
     let fresh = login(&app, "siti@example.com", "sandi-baru-456").await;
     assert_eq!(
         app.get("/api/v1/me", Some(&fresh)).await.status,

@@ -192,7 +192,7 @@ All `/me` routes need a bearer token (any role). The `PATCH` routes return the u
 ```
 
 - The email is trimmed and lowercased. There is no verification email.
-- On success all of the user's tokens stop working, including the one used for this call: the next request gets `401 unauthorized`, so the client must log in again with the new email. The response is still `200` with the updated user.
+- On success every older token stops working, including the one used for this call. The `200` body is the login body, `{ "token", "user" }`; the new token works, so the client swaps it in and stays signed in. Other devices must log in again.
 - Errors: `invalid_value` (422), `invalid_credentials` (401, wrong password), `google_account` (403, Google-only account), `email_taken` (409).
 
 ### PUT /api/v1/me/password
@@ -201,8 +201,8 @@ All `/me` routes need a bearer token (any role). The `PATCH` routes return the u
 { "current_password": "rahasia123", "new_password": "rahasia456" }
 ```
 
-- `new_password` is 8 to 128 characters. `204 No Content`.
-- On success all of the user's tokens stop working, including the one used for this call: the client must log in again with the new password.
+- `new_password` is 8 to 128 characters.
+- On success every older token stops working, including the one used for this call. The `200` body is the login body, `{ "token", "user" }`; the new token works, so the client swaps it in and stays signed in. Other devices must log in again.
 - The `details.field` of a length error is `new_password`.
 - Errors: `invalid_value` (422), `invalid_credentials` (401), `google_account` (403).
 

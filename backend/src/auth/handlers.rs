@@ -35,9 +35,9 @@ pub fn routes() -> Router<AppState> {
 }
 
 #[derive(Serialize)]
-struct AuthResponse {
-    token: String,
-    user: UserResponse,
+pub(crate) struct AuthResponse {
+    pub(crate) token: String,
+    pub(crate) user: UserResponse,
 }
 
 #[derive(Deserialize)]
@@ -85,7 +85,12 @@ pub(crate) fn check_password_len(field: &str, password: &str) -> Result<(), AppE
     max_len(field, password, MAX_PASSWORD_CHARS)
 }
 
-fn token_for(state: &AppState, id: Uuid, role_id: i32, version: i32) -> Result<String, AppError> {
+pub(crate) fn token_for(
+    state: &AppState,
+    id: Uuid,
+    role_id: i32,
+    version: i32,
+) -> Result<String, AppError> {
     issue_token(
         &state.config.jwt_secret,
         id,
