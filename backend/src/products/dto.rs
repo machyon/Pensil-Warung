@@ -7,7 +7,7 @@ use serde::Serialize;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
-use super::Product;
+use super::{Movement, Product};
 use crate::state::AppState;
 
 /// Stock is a whole number in v1, so it goes out as a plain integer.
@@ -70,4 +70,30 @@ pub async fn respond(state: &AppState, products: Vec<Product>) -> Vec<ProductRes
 
 pub async fn respond_one(state: &AppState, product: Product) -> ProductResponse {
     respond(state, vec![product]).await.remove(0)
+}
+
+/// Quantities are whole numbers in v1, so they go out as plain integers.
+#[derive(Serialize)]
+pub struct MovementResponse {
+    id: i64,
+    reason: String,
+    delta: i64,
+    stock_after: i64,
+    note: Option<String>,
+    created_at: String,
+    transaction_id: Option<i64>,
+}
+
+impl From<Movement> for MovementResponse {
+    fn from(m: Movement) -> Self {
+        MovementResponse {
+            id: m.id,
+            reason: m.reason,
+            delta: m.delta.to_i64().unwrap_or_default(),
+            stock_after: m.stock_after.to_i64().unwrap_or_default(),
+            note: m.note,
+            created_at: rfc3339(m.created_at),
+            transaction_id: m.transaction_id,
+        }
+    }
 }

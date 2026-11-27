@@ -830,3 +830,78 @@ async fn photo_url_is_null_without_storage() {
     let res = app.get(P, Some(&token)).await;
     assert_eq!(res.json["items"][0]["photo_url"], Value::Null);
 }
+
+#[tokio::test]
+async fn movements_are_newest_first_paged_and_sale_has_transaction_id() {
+    let app = TestApp::new().await;
+    let a = app.register("Siti", "siti@example.com", "rahasia123").await;
+    let b = app.register("Budi", "budi@example.com", "rahasia123").await;
+    let uid = user_id(&app, "siti@example.com").await;
+    let id = seed(&app, &a, "Nasi Goreng", 10).await;
+    let pid = id.as_i64().unwrap();
+    let path = format!("{P}/{id}");
+
+    app.patch_json(&path, Some(&a), &json!({"stock": 15, "note": "belanja"}))
+        .await;
+    let client = app.client().await;
+    let tx_id: i64 = client
+        .query_one(
+            "INSERT INTO transactions (user_id, raw_text, total) VALUES ($1, 'nasi goreng 2', 2000)
+             RETURNING id",
+            &[&uid],
+        )
+        .await
+        .unwrap()
+        .get(0);
+    client
+        .execute(
+            "INSERT INTO transaction_items
+               (transaction_id, product_id, line_no, product_name, unit_price, quantity, line_total)
+             VALUES ($1, $2, 1, 'Nasi Goreng', 1000, 2, 2000)",
+            &[&tx_id, &pid],
+        )
+        .await
+        .unwrap();
+
+    let res = app.get(&format!("{path}/movements"), Some(&a)).await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.text);
+    let items = res.json["items"].as_array().unwrap();
+    let reasons: Vec<_> = items
+        .iter()
+        .map(|m| m["reason"].as_str().unwrap())
+        .collect();
+    assert_eq!(reasons, ["sale", "restock", "initial"]);
+    assert_eq!(items[0]["delta"], json!(-2));
+    assert_eq!(items[0]["stock_after"], json!(13));
+    assert_eq!(items[0]["transaction_id"], json!(tx_id));
+    assert_eq!(items[1]["note"], "belanja");
+    assert_eq!(items[1]["transaction_id"], Value::Null);
+    assert_eq!(res.json["next_cursor"], Value::Null);
+
+    // Page by one: every row exactly once, same order.
+    let mut seen = vec![];
+    let mut url = format!("{path}/movements?limit=1");
+    loop {
+        let res = app.get(&url, Some(&a)).await;
+        seen.push(res.json["items"][0]["reason"].as_str().unwrap().to_string());
+        match res.json["next_cursor"].as_str() {
+            Some(c) => url = format!("{path}/movements?limit=1&cursor={c}"),
+            None => break,
+        }
+    }
+    assert_eq!(seen, reasons);
+
+    let res = app
+        .get(&format!("{path}/movements?cursor=garbage"), Some(&a))
+        .await;
+    assert_eq!(res.status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(res.json["error"]["details"]["field"], "cursor");
+
+    let res = app.get(&format!("{path}/movements"), Some(&b)).await;
+    assert_eq!(res.status, StatusCode::NOT_FOUND);
+    assert_eq!(res.json["error"]["code"], "not_found");
+    assert_eq!(
+        app.get(&format!("{path}/movements"), None).await.status,
+        StatusCode::UNAUTHORIZED
+    );
+}

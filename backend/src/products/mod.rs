@@ -16,6 +16,7 @@ use tokio_postgres::{GenericClient, Row};
 use uuid::Uuid;
 
 use crate::common::names::{name_key, normalize_product_name};
+use crate::common::pagination::Cursor;
 use crate::common::validate::{max_len, non_negative_money};
 use crate::error::{AppError, AppResult, ErrorCode};
 
@@ -279,6 +280,51 @@ pub async fn get(client: &impl GenericClient, user_id: Uuid, id: i64) -> AppResu
         .await?
         .ok_or_else(AppError::not_found)?;
     Ok(Product::from(&row))
+}
+
+/// One page of a product's stock ledger, newest first, after `after` when given.
+/// Callers pass `limit + 1` and check the product's ownership first.
+pub async fn list_movements(
+    client: &impl GenericClient,
+    product_id: i64,
+    after: Option<Cursor>,
+    limit: i64,
+) -> AppResult<Vec<Movement>> {
+    let (at, id) = after.map_or((None, None), |c| (Some(c.occurred_at), Some(c.id)));
+    let rows = client
+        .query(
+            "SELECT m.id, m.reason::text, m.delta, m.stock_after, m.note, m.created_at, ti.transaction_id
+             FROM stock_movements m
+             LEFT JOIN transaction_items ti ON ti.id = m.transaction_item_id
+             WHERE m.product_id = $1
+               AND ($2::timestamptz IS NULL OR (m.created_at, m.id) < ($2, $3))
+             ORDER BY m.created_at DESC, m.id DESC
+             LIMIT $4",
+            &[&product_id, &at, &id, &limit],
+        )
+        .await?;
+    Ok(rows
+        .iter()
+        .map(|r| Movement {
+            id: r.get(0),
+            reason: r.get(1),
+            delta: r.get(2),
+            stock_after: r.get(3),
+            note: r.get(4),
+            created_at: r.get(5),
+            transaction_id: r.get(6),
+        })
+        .collect())
+}
+
+pub struct Movement {
+    pub id: i64,
+    pub reason: String,
+    pub delta: Decimal,
+    pub stock_after: Decimal,
+    pub note: Option<String>,
+    pub created_at: OffsetDateTime,
+    pub transaction_id: Option<i64>,
 }
 
 /// `%q%` for ILIKE with `%`, `_` and `\` escaped; `None` for a missing or blank `q`.
