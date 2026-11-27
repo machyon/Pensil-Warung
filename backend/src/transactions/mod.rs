@@ -3,6 +3,7 @@
 
 pub mod dto;
 pub mod handlers;
+pub mod revise;
 
 use std::collections::HashMap;
 
