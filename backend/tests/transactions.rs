@@ -413,3 +413,429 @@ async fn void_accepts_an_empty_body_and_rejects_bad_json() {
     let res = app.send(post(b, Some("application/json"), "")).await;
     assert_eq!(res.status, StatusCode::OK, "{}", res.text);
 }
+
+// ---- revise ----
+
+async fn revise(app: &TestApp, token: &str, id: i64, uuid: Uuid, items: Value) -> TestResponse {
+    app.post_json(
+        &format!("{URL}/{id}/revise"),
+        Some(token),
+        &json!({"client_uuid": uuid, "items": items}),
+    )
+    .await
+}
+
+async fn detail(app: &TestApp, token: &str, id: i64) -> Value {
+    let res = app.get(&format!("{URL}/{id}"), Some(token)).await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.text);
+    res.json
+}
+
+fn item_id(t: &Value, line: usize) -> i64 {
+    t["items"][line]["id"].as_i64().unwrap()
+}
+
+fn line_errors(res: &TestResponse) -> Vec<(i64, String)> {
+    assert_eq!(res.status, StatusCode::UNPROCESSABLE_ENTITY, "{}", res.text);
+    assert_eq!(res.json["error"]["code"], "lines_invalid");
+    res.json["error"]["details"]["lines"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|l| {
+            (
+                l["line_no"].as_i64().unwrap(),
+                l["code"].as_str().unwrap().to_owned(),
+            )
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn revise_keeps_snapshots_restores_then_takes_stock_and_chains_history() {
+    let app = TestApp::new().await;
+    let t = app
+        .register("Siti", "siti@example.com", "password123")
+        .await;
+    let nasi = product(&app, &t, "Nasi goreng", 10000, 10).await;
+    let teh = product(&app, &t, "Es teh", 2000, 5).await;
+    let kopi = product(&app, &t, "Kopi", 5000, 1).await;
+    let first = sell(&app, &t, &[("Nasi goreng", 2), ("Es teh", 1)]).await;
+    set_time(&app, first, "2026-11-17 03:00:00+00").await;
+    // The product price moves after the sale; the old item keeps its snapshot.
+    app.client()
+        .await
+        .execute("UPDATE products SET price = 12000 WHERE id = $1", &[&nasi])
+        .await
+        .unwrap();
+    assert_eq!((stock(&app, nasi).await, stock(&app, teh).await), (8, 4));
+    let old = detail(&app, &t, first).await;
+    assert_eq!(old["replaces_id"], Value::Null);
+    assert_eq!(old["replaced_by_id"], Value::Null);
+    assert_eq!(old["history"], json!([]));
+
+    // Nasi 2 -> 3, Es teh removed, Kopi (stock 1) added at its current price.
+    let res = revise(
+        &app,
+        &t,
+        first,
+        Uuid::new_v4(),
+        json!([{"item_id": item_id(&old, 0), "quantity": 3}, {"product_id": kopi, "quantity": 1}]),
+    )
+    .await;
+    assert_eq!(res.status, StatusCode::CREATED, "{}", res.text);
+    let second = res.json["id"].as_i64().unwrap();
+    assert_eq!(res.json["status"], "completed");
+    assert_eq!(res.json["occurred_at"], "2026-11-17T03:00:00Z");
+    assert_eq!(res.json["raw_text"], "Nasi goreng 3\nKopi 1");
+    assert_eq!(res.json["total"], 3 * 10000 + 5000);
+    assert_eq!(res.json["replaces_id"], first);
+    assert_eq!(res.json["replaced_by_id"], Value::Null);
+    let items = res.json["items"].as_array().unwrap();
+    assert_eq!(items.len(), 2);
+    assert_eq!(
+        (
+            items[0]["line_no"].as_i64(),
+            items[0]["unit_price"].as_i64()
+        ),
+        (Some(1), Some(10000))
+    );
+    assert_eq!(items[0]["product_id"], nasi);
+    assert_eq!(
+        (
+            items[1]["line_no"].as_i64(),
+            items[1]["unit_price"].as_i64()
+        ),
+        (Some(2), Some(5000))
+    );
+    assert_eq!(res.json["history"].as_array().unwrap().len(), 1);
+    assert_eq!(res.json["history"][0]["id"], first);
+    assert_eq!(res.json["history"][0]["raw_text"], "x");
+    assert_eq!(res.json["history"][0]["items"].as_array().unwrap().len(), 2);
+    assert!(res.json["history"][0]["revised_at"].is_string());
+    // 10 - 3, Es teh restored to 5, Kopi taken.
+    assert_eq!(
+        (
+            stock(&app, nasi).await,
+            stock(&app, teh).await,
+            stock(&app, kopi).await
+        ),
+        (7, 5, 0)
+    );
+
+    // The replaced row is voided, points forward, and leaves the day list.
+    let old = detail(&app, &t, first).await;
+    assert_eq!(old["status"], "voided");
+    assert_eq!(old["replaced_by_id"], second);
+    let day = app.get(&format!("{URL}?date=2026-11-17"), Some(&t)).await;
+    assert_eq!(ids(&day), [second]);
+    assert_eq!(day.json["day"]["transaction_count"], 1);
+    assert_eq!(day.json["day"]["revenue"], 35000);
+
+    // Revise the revision: history has both older versions, newest first.
+    let cur = detail(&app, &t, second).await;
+    let res = revise(
+        &app,
+        &t,
+        second,
+        Uuid::new_v4(),
+        json!([{"item_id": item_id(&cur, 0), "quantity": 1}]),
+    )
+    .await;
+    assert_eq!(res.status, StatusCode::CREATED, "{}", res.text);
+    let third = res.json["id"].as_i64().unwrap();
+    let hist: Vec<i64> = res.json["history"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|h| h["id"].as_i64().unwrap())
+        .collect();
+    assert_eq!(hist, [second, first]);
+    assert_eq!(
+        detail(&app, &t, third).await["history"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    assert_eq!(stock(&app, kopi).await, 1);
+    assert_eq!(stock(&app, nasi).await, 9);
+
+    // A replaced row cannot be revised or cancelled again.
+    for id in [first, second] {
+        let res = revise(
+            &app,
+            &t,
+            id,
+            Uuid::new_v4(),
+            json!([{"product_id": kopi, "quantity": 1}]),
+        )
+        .await;
+        assert_eq!(res.status, StatusCode::CONFLICT, "{}", res.text);
+        assert_eq!(res.json["error"]["code"], "already_voided");
+    }
+}
+
+#[tokio::test]
+async fn cancelled_row_has_no_replacement_and_cannot_be_revised() {
+    let app = TestApp::new().await;
+    let t = app
+        .register("Siti", "siti@example.com", "password123")
+        .await;
+    let kopi = product(&app, &t, "Kopi", 5000, 10).await;
+    let id = sell(&app, &t, &[("Kopi", 1)]).await;
+    assert_eq!(void(&app, &t, id, json!({})).await.status, StatusCode::OK);
+    let d = detail(&app, &t, id).await;
+    assert_eq!(d["status"], "voided");
+    assert_eq!(d["replaced_by_id"], Value::Null);
+    let res = revise(
+        &app,
+        &t,
+        id,
+        Uuid::new_v4(),
+        json!([{"product_id": kopi, "quantity": 1}]),
+    )
+    .await;
+    assert_eq!(res.status, StatusCode::CONFLICT, "{}", res.text);
+    assert_eq!(res.json["error"]["code"], "already_voided");
+}
+
+#[tokio::test]
+async fn revise_retry_returns_the_same_transaction_and_no_changes_is_422() {
+    let app = TestApp::new().await;
+    let t = app
+        .register("Siti", "siti@example.com", "password123")
+        .await;
+    let kopi = product(&app, &t, "Kopi", 5000, 10).await;
+    let id = sell(&app, &t, &[("Kopi", 2)]).await;
+    let old = detail(&app, &t, id).await;
+    let keep = |q: i64| json!([{"item_id": item_id(&old, 0), "quantity": q}]);
+
+    let res = revise(&app, &t, id, Uuid::new_v4(), keep(2)).await;
+    assert_eq!(res.status, StatusCode::UNPROCESSABLE_ENTITY, "{}", res.text);
+    assert_eq!(res.json["error"]["code"], "no_changes");
+    assert_eq!(detail(&app, &t, id).await["status"], "completed");
+
+    let uuid = Uuid::new_v4();
+    let a = revise(&app, &t, id, uuid, keep(5)).await;
+    assert_eq!(a.status, StatusCode::CREATED, "{}", a.text);
+    let b = revise(&app, &t, id, uuid, keep(5)).await;
+    assert_eq!(b.status, StatusCode::OK, "{}", b.text);
+    assert_eq!(a.json["id"], b.json["id"]);
+    assert_eq!(stock(&app, kopi).await, 5);
+    let n: i64 = app
+        .client()
+        .await
+        .query_one("SELECT count(*) FROM transactions", &[])
+        .await
+        .unwrap()
+        .get(0);
+    assert_eq!(n, 2);
+}
+
+#[tokio::test]
+async fn revise_collects_line_errors_with_one_based_line_numbers() {
+    let app = TestApp::new().await;
+    let t = app
+        .register("Siti", "siti@example.com", "password123")
+        .await;
+    let other = app
+        .register("Budi", "budi@example.com", "password123")
+        .await;
+    let kopi = product(&app, &t, "Kopi", 5000, 10).await;
+    let teh = product(&app, &t, "Teh", 2000, 3).await;
+    let foreign = product(&app, &other, "Gula", 1000, 10).await;
+    let id = sell(&app, &t, &[("Kopi", 2)]).await;
+    let old = detail(&app, &t, id).await;
+    let k = item_id(&old, 0);
+
+    let res = revise(
+        &app,
+        &t,
+        id,
+        Uuid::new_v4(),
+        json!([
+            {"item_id": 999999, "quantity": 1},
+            {"item_id": k, "quantity": 1},
+            {"item_id": k, "quantity": 1},
+            {"product_id": foreign, "quantity": 1},
+            {"product_id": kopi, "quantity": 2.5},
+            {"product_id": teh, "quantity": 4},
+        ]),
+    )
+    .await;
+    let codes = |v: &[(i64, &str)]| -> Vec<(i64, String)> {
+        v.iter().map(|(n, c)| (*n, (*c).to_owned())).collect()
+    };
+    assert_eq!(
+        line_errors(&res),
+        codes(&[
+            (1, "item_not_found"),
+            (3, "item_not_found"),
+            (4, "product_not_found"),
+            (5, "invalid_quantity"),
+            (6, "stock_insufficient"),
+        ])
+    );
+    // Stock counts the restored old sale: Kopi 8 + 2 = 10, so 10 is fine, 11 is not.
+    let res = revise(
+        &app,
+        &t,
+        id,
+        Uuid::new_v4(),
+        json!([{"product_id": kopi, "quantity": 11}]),
+    )
+    .await;
+    assert_eq!(line_errors(&res), codes(&[(1, "stock_insufficient")]));
+    let res = revise(
+        &app,
+        &t,
+        id,
+        Uuid::new_v4(),
+        json!([{"product_id": kopi, "quantity": 10}]),
+    )
+    .await;
+    assert_eq!(res.status, StatusCode::CREATED, "{}", res.text);
+    assert_eq!(stock(&app, kopi).await, 0);
+
+    // Nothing was changed by the failures.
+    let id2 = sell(&app, &t, &[("Teh", 1)]).await;
+    for items in [
+        json!([]),
+        Value::Array(vec![json!({"product_id": teh, "quantity": 1}); 201]),
+    ] {
+        let res = revise(&app, &t, id2, Uuid::new_v4(), items).await;
+        assert_eq!(res.status, StatusCode::UNPROCESSABLE_ENTITY, "{}", res.text);
+        assert_eq!(res.json["error"]["code"], "invalid_body");
+    }
+    assert_eq!(detail(&app, &t, id2).await["status"], "completed");
+    assert_eq!(stock(&app, teh).await, 2);
+}
+
+#[tokio::test]
+async fn item_of_a_deleted_product_survives_a_revision() {
+    let app = TestApp::new().await;
+    let t = app
+        .register("Siti", "siti@example.com", "password123")
+        .await;
+    let kopi = product(&app, &t, "Kopi", 5000, 10).await;
+    let teh = product(&app, &t, "Teh", 2000, 10).await;
+    let id = sell(&app, &t, &[("Kopi", 2), ("Teh", 1)]).await;
+    let res = app
+        .delete_json(&format!("/api/v1/products/{teh}"), Some(&t), None)
+        .await;
+    assert!(res.status.is_success(), "{}", res.text);
+    let old = detail(&app, &t, id).await;
+    assert_eq!(old["items"][1]["product_id"], Value::Null);
+
+    let res = revise(
+        &app,
+        &t,
+        id,
+        Uuid::new_v4(),
+        json!([{"item_id": item_id(&old, 1), "quantity": 1}, {"item_id": item_id(&old, 0), "quantity": 1}]),
+    )
+    .await;
+    assert_eq!(res.status, StatusCode::CREATED, "{}", res.text);
+    let items = &res.json["items"];
+    assert_eq!(items[0]["product_id"], Value::Null);
+    assert_eq!(items[0]["product_name"], "Teh");
+    assert_eq!(items[0]["unit_price"], 2000);
+    assert_eq!(items[1]["product_id"], kopi);
+    assert_eq!(res.json["total"], 7000);
+    assert_eq!(stock(&app, kopi).await, 9);
+}
+
+#[tokio::test]
+async fn revise_needs_create_and_void_and_is_scoped_to_the_user() {
+    use backend::auth::perms::Permissions;
+    use backend::state::AppState;
+    use std::sync::Arc;
+    let mut app = TestApp::new().await;
+    let t = app
+        .register("Siti", "siti@example.com", "password123")
+        .await;
+    let other = app
+        .register("Budi", "budi@example.com", "password123")
+        .await;
+    let kopi = product(&app, &t, "Kopi", 5000, 10).await;
+    let id = sell(&app, &t, &[("Kopi", 1)]).await;
+    let items = json!([{"product_id": kopi, "quantity": 2}]);
+
+    let res = revise(&app, &t, 999999, Uuid::new_v4(), items.clone()).await;
+    assert_eq!(res.status, StatusCode::NOT_FOUND, "{}", res.text);
+    let res = revise(&app, &other, id, Uuid::new_v4(), items.clone()).await;
+    assert_eq!(res.status, StatusCode::NOT_FOUND, "{}", res.text);
+    let res = app
+        .post_json(&format!("{URL}/{id}/revise"), None, &json!({}))
+        .await;
+    assert_eq!(res.status, StatusCode::UNAUTHORIZED);
+
+    // A role with transaction.create but not transaction.void, and the broadcaster.
+    let uid: Uuid = app
+        .client()
+        .await
+        .query_one("SELECT id FROM users WHERE email = 'siti@example.com'", &[])
+        .await
+        .unwrap()
+        .get(0);
+    app.client()
+        .await
+        .batch_execute(
+            "INSERT INTO roles (id, name) VALUES (3, 'cashier');
+             INSERT INTO role_permission (role_id, permission_id)
+               SELECT 3, id FROM permissions WHERE name = 'transaction.create';",
+        )
+        .await
+        .unwrap();
+    app.router = backend::routes::router(AppState {
+        pool: app.pool.clone(),
+        config: app.config.clone(),
+        perms: Arc::new(Permissions::load(&app.pool).await.unwrap()),
+        google_keys: Arc::default(),
+        storage: None,
+    });
+    for role in [3, 2] {
+        let token = backend::auth::jwt::issue_token(
+            &app.config.jwt_secret,
+            uid,
+            role,
+            0,
+            app.config.jwt_expires_in,
+        )
+        .unwrap();
+        let res = revise(&app, &token, id, Uuid::new_v4(), items.clone()).await;
+        assert_eq!(res.status, StatusCode::FORBIDDEN, "{}", res.text);
+    }
+    assert_eq!(detail(&app, &t, id).await["status"], "completed");
+}
+
+#[tokio::test]
+async fn analytics_month_counts_only_the_new_version() {
+    let app = TestApp::new().await;
+    let t = app
+        .register("Siti", "siti@example.com", "password123")
+        .await;
+    let kopi = product(&app, &t, "Kopi", 5000, 10).await;
+    let id = sell(&app, &t, &[("Kopi", 2)]).await;
+    set_time(&app, id, "2026-03-10 03:00:00+00").await;
+    let month = || async {
+        app.get("/api/v1/analytics/month?month=2026-03", Some(&t))
+            .await
+            .json
+    };
+    assert_eq!(month().await["revenue"], 10000);
+
+    let res = revise(
+        &app,
+        &t,
+        id,
+        Uuid::new_v4(),
+        json!([{"product_id": kopi, "quantity": 3}]),
+    )
+    .await;
+    assert_eq!(res.status, StatusCode::CREATED, "{}", res.text);
+    let j = month().await;
+    assert_eq!(j["revenue"], 15000);
+    assert_eq!(j["transaction_count"], 1);
+}
