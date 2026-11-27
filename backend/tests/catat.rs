@@ -337,6 +337,7 @@ async fn retry_with_the_same_client_uuid_replays_the_transaction() {
     );
     assert_eq!(again.json["products_changed"][0]["id"], nasi);
     assert_eq!(again.json["products_changed"][0]["stock"], 7);
+    assert_eq!(again.json["products_changed"][0]["price"], 15000);
     assert_eq!(again.json["products_deleted"], json!([]));
     assert_eq!(count(&app, "transactions").await, 1);
     assert_eq!(count(&app, "transaction_items").await, 1);
@@ -646,4 +647,118 @@ async fn futures_join<F: std::future::Future>(fs: Vec<F>) -> Vec<F::Output> {
     })
     .await;
     out.into_iter().map(Option::unwrap).collect()
+}
+
+#[tokio::test]
+async fn price_change_applies_to_later_sale_lines_only() {
+    let app = TestApp::new().await;
+    let t = user(&app).await;
+    let teh = product(&app, &t, "Es Teh Manis", 5000, 10).await;
+    let ops = json!([
+        {"line_no": 1, "op": "sale", "product": "es teh manis", "quantity": 1},
+        {"line_no": 2, "op": "set_price", "product": "es teh manis", "price": 6000},
+        {"line_no": 3, "op": "sale", "product": "es teh manis", "quantity": 2},
+    ]);
+    let res = catat(&app, &t, Uuid::new_v4(), "x", ops).await;
+    assert_eq!(res.status, StatusCode::CREATED, "{}", res.text);
+    let items = &res.json["transaction"]["items"];
+    assert_eq!(items[0]["unit_price"], 5000);
+    assert_eq!(items[1]["unit_price"], 6000);
+    assert_eq!(res.json["transaction"]["total"], 17000);
+    assert_eq!(res.json["products_changed"][0]["id"], teh);
+    assert_eq!(res.json["products_changed"][0]["price"], 6000);
+    let price: i64 = app
+        .client()
+        .await
+        .query_one("SELECT price FROM products WHERE id = $1", &[&teh])
+        .await
+        .unwrap()
+        .get(0);
+    assert_eq!(price, 6000);
+}
+
+#[tokio::test]
+async fn set_price_alone_changes_the_product_and_needs_no_transaction() {
+    let app = TestApp::new().await;
+    let t = user(&app).await;
+    product(&app, &t, "Kopi", 3000, 1).await;
+    let ops = json!([{"line_no": 1, "op": "set_price", "product": "kopi", "price": 3500}]);
+    let res = catat(&app, &t, Uuid::new_v4(), "ubah harga kopi 3500", ops).await;
+    assert_eq!(res.status, StatusCode::CREATED, "{}", res.text);
+    assert_eq!(res.json["transaction"], Value::Null);
+    assert_eq!(res.json["products_changed"][0]["price"], 3500);
+}
+
+#[tokio::test]
+async fn invalid_price_and_unknown_product_are_line_errors() {
+    let app = TestApp::new().await;
+    let t = user(&app).await;
+    let kopi = product(&app, &t, "Kopi", 3000, 1).await;
+    let ops = json!([
+        {"line_no": 1, "op": "set_price", "product": "kopi", "price": -1},
+        {"line_no": 2, "op": "set_price", "product": "kopi", "price": 1.5},
+    ]);
+    let res = catat(&app, &t, Uuid::new_v4(), "x", ops).await;
+    assert_eq!(res.status, StatusCode::UNPROCESSABLE_ENTITY, "{}", res.text);
+    assert_eq!(
+        line_codes(&res),
+        [(1, "invalid_price".into()), (2, "invalid_price".into())]
+    );
+    let ops = json!([{"line_no": 1, "op": "set_price", "product": "hantu", "price": 1}]);
+    let res = catat(&app, &t, Uuid::new_v4(), "x", ops).await;
+    assert_eq!(line_codes(&res), [(1, "product_not_found".into())]);
+    let price: i64 = app
+        .client()
+        .await
+        .query_one("SELECT price FROM products WHERE id = $1", &[&kopi])
+        .await
+        .unwrap()
+        .get(0);
+    assert_eq!(price, 3000);
+}
+
+async fn movement_notes(app: &TestApp, id: i64) -> Vec<Option<String>> {
+    let rows = app
+        .client()
+        .await
+        .query(
+            "SELECT note FROM stock_movements WHERE product_id = $1 AND reason = 'adjustment' ORDER BY id",
+            &[&id],
+        )
+        .await
+        .unwrap();
+    rows.iter().map(|r| r.get(0)).collect()
+}
+
+#[tokio::test]
+async fn adjust_down_note_is_stored_trimmed_and_blank_is_none() {
+    let app = TestApp::new().await;
+    let t = user(&app).await;
+    let kopi = product(&app, &t, "Kopi", 3000, 10).await;
+    let ops = json!([
+        {"line_no": 1, "op": "adjust_down", "product": "kopi", "quantity": 1, "note": "  basi "},
+        {"line_no": 2, "op": "adjust_down", "product": "kopi", "quantity": 1, "note": "   "},
+        {"line_no": 3, "op": "adjust_down", "product": "kopi", "quantity": 1},
+    ]);
+    let res = catat(&app, &t, Uuid::new_v4(), "x", ops).await;
+    assert_eq!(res.status, StatusCode::CREATED, "{}", res.text);
+    assert_eq!(
+        movement_notes(&app, kopi).await,
+        [Some("basi".to_owned()), None, None]
+    );
+    assert_eq!(stock(&app, kopi).await, 7);
+}
+
+#[tokio::test]
+async fn adjust_down_note_over_200_chars_is_invalid_value() {
+    let app = TestApp::new().await;
+    let t = user(&app).await;
+    let kopi = product(&app, &t, "Kopi", 3000, 10).await;
+    let ops = json!([
+        {"line_no": 1, "op": "adjust_down", "product": "kopi", "quantity": 1, "note": "x".repeat(201)},
+    ]);
+    let res = catat(&app, &t, Uuid::new_v4(), "x", ops).await;
+    assert_eq!(res.status, StatusCode::UNPROCESSABLE_ENTITY, "{}", res.text);
+    assert_eq!(line_codes(&res), [(1, "invalid_value".into())]);
+    assert_eq!(stock(&app, kopi).await, 10);
 }
