@@ -1,6 +1,6 @@
 # Pensil Warung: database
 
-Context for agents working on this repo. The schema lives in `backend/migrations/0001_init.sql` (PostgreSQL 18).
+Context for agents working on this repo. The schema lives in `backend/migrations/V1__init.sql` (PostgreSQL 18).
 
 ## What the app is
 Mobile sales notebook for small Indonesian warung owners (UI text is Indonesian). The owner types sales as plain text ("nasi goreng 2"); the app parses them into transactions and updates stock. There is also a separate broadcaster role that posts announcements to all users. Source design: the Hi-Fi page of the "Pensil Warung Onboarding" canvas. Light and dark screens are the same data.
@@ -20,20 +20,20 @@ Mobile sales notebook for small Indonesian warung owners (UI text is Indonesian)
 
 ## Tables
 - `roles`, `permissions`, `role_permission`: plain id + name. Seeded: role 1 = user, 2 = broadcaster. `users.role_id` defaults to 1.
-- `users`: `email`, `display_name`, `username`, `role_id`.
+- `users`: `email`, `display_name`, `username`, `role_id`, `token_version` (starts at 0, bumped on email or password change; a JWT whose `ver` differs is rejected).
 - `auth_identities`: one row per login method per user.
-- `products`: name (unique per user, case-insensitive), price, stock, optional photo.
+- `products`: name (unique per user, case-insensitive), price, stock, optional photo (`photo_key`, a Tigris object key; the API returns presigned URLs).
 - `transactions`: one "Simpan" = one transaction. Holds `raw_text`, `total`, `status` (completed or voided).
 - `transaction_items`: snapshot of name and price at sale time.
 - `stock_movements`: ledger of every stock change (initial, sale, void_sale, restock, adjustment).
-- `broadcasts`: category, title (60), summary (120), optional body, status (scheduled, sent, cancelled), `broadcasted_at` is the sent time.
+- `broadcasts`: category, title (60), summary (120), optional body, status (scheduled, sent, cancelled), `broadcasted_at` is the sent time. The view `v_broadcasts` adds `effective_status` and `shown_at` (see the read-time rule below).
 
 ## Rules to keep
 - Never `UPDATE products.stock`. Insert a `stock_movements` row; a trigger applies it. Selling more than the stock fails with SQLSTATE 23514 and rolls back the whole sale.
 - Insert a transaction, then its items, in one database transaction; item triggers create the sale movements. Pass `total` and each `line_total = round(quantity * unit_price)`.
 - Transactions are never deleted. Void them (`status = 'voided'` and set `voided_at`): stock is restored and a void cannot be undone.
 - Deleting a product is a hard delete. Past sale items keep their name and price (`product_id` becomes NULL). The product's stock movements are deleted with it.
-- Broadcast feed query: `WHERE status = 'sent' ORDER BY broadcasted_at DESC, id DESC LIMIT 5`. No per-user cursor or read-state.
+- Broadcast feed query: `SELECT … FROM v_broadcasts WHERE effective_status = 'sent' ORDER BY shown_at DESC, id DESC LIMIT 5`. No per-user cursor or read-state. A broadcast counts as sent when `status = 'sent' OR (status = 'scheduled' AND scheduled_for <= now())`, and `shown_at = coalesce(broadcasted_at, scheduled_for)`. Editing or cancelling needs `status = 'scheduled' AND scheduled_for > now()`.
 - Names: `display_name` allows only letters, digits and spaces. The database does not clean names, it rejects bad ones (check `users_display_name_chars`). The trigger only fills a blank name with `user <n>`.
 - Usernames: `generate_username()` returns `siti_rahayu`, then `siti_rahayu_1`, and so on. It is best effort, so retry once on SQLSTATE 23505.
 
@@ -42,16 +42,12 @@ Mobile sales notebook for small Indonesian warung owners (UI text is Indonesian)
 - Check permissions before writes, for example only `broadcast.create` may insert broadcasts.
 - Parse the typed text, match product names, and surface "barang tidak ditemukan".
 - Check that a sale only uses the seller's own products, and that `total` equals the sum of the line totals.
-- Move scheduled broadcasts to `sent` and set `broadcasted_at` when due.
+- Scheduled broadcasts are not moved to `sent` when due: there is no scheduler, so the read-time rule above decides (use `v_broadcasts`). Only "send now" sets `status = 'sent'` and `broadcasted_at`.
 
 ## Migrations
-Apply to an empty database, in one transaction:
+Run from `backend/` with `cargo run -- migrate`. Migrations are embedded by refinery. Each one runs in its own transaction, and applied versions are recorded in `refinery_schema_history`. Running it again does nothing.
 
-```sh
-psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 --single-transaction -f backend/migrations/0001_init.sql
-```
-
-Once a migration has been applied to a shared database, do not edit it; add a new numbered file.
+Once a migration has been applied to a shared database, do not edit it; add a new `V<n>__name.sql` file instead.
 
 ## Testing
-No test suite yet. Check the schema on a throwaway Postgres 18 (`initdb`, load `backend/migrations/0001_init.sql`, exercise sales, void, delete, names and broadcasts). Do the same after any change.
+Database tests are in `backend/tests/` (for example `tests/migrations.rs`). They create a throwaway Postgres 18 database per test. See `backend/README.md` for how to run them.
