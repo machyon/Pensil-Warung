@@ -46,6 +46,11 @@ pub enum OpDto {
         product: String,
         quantity: Number,
     },
+    SetPrice {
+        line_no: u32,
+        product: String,
+        price: Number,
+    },
     CreateProduct {
         line_no: u32,
         name: String,
@@ -64,6 +69,7 @@ impl OpDto {
             OpDto::Sale { line_no, .. }
             | OpDto::Restock { line_no, .. }
             | OpDto::AdjustDown { line_no, .. }
+            | OpDto::SetPrice { line_no, .. }
             | OpDto::CreateProduct { line_no, .. }
             | OpDto::DeleteProduct { line_no, .. } => *line_no,
         }
@@ -128,6 +134,11 @@ pub enum Op {
         key: String,
         quantity: Decimal,
     },
+    SetPrice {
+        line_no: u32,
+        key: String,
+        price: i64,
+    },
     /// `name` is normalized (trimmed, single spaces), 1-60 characters.
     CreateProduct {
         line_no: u32,
@@ -147,6 +158,7 @@ impl Op {
             Op::Sale { line_no, .. }
             | Op::Restock { line_no, .. }
             | Op::AdjustDown { line_no, .. }
+            | Op::SetPrice { line_no, .. }
             | Op::CreateProduct { line_no, .. }
             | Op::DeleteProduct { line_no, .. } => *line_no,
         }
@@ -232,6 +244,11 @@ fn validate_op(dto: &OpDto) -> Result<Op, LineError> {
             key: product_key(line_no, product)?,
             quantity: quantity_of(line_no, quantity)?,
         }),
+        OpDto::SetPrice { product, price, .. } => Ok(Op::SetPrice {
+            line_no,
+            key: product_key(line_no, product)?,
+            price: price_of(line_no, price)?,
+        }),
         OpDto::DeleteProduct { product, .. } => Ok(Op::DeleteProduct {
             line_no,
             key: product_key(line_no, product)?,
@@ -250,16 +267,7 @@ fn validate_op(dto: &OpDto) -> Result<Op, LineError> {
             Ok(Op::CreateProduct {
                 line_no,
                 name,
-                price: whole_number(price)
-                    .and_then(|d| d.to_i64())
-                    .filter(|p| *p >= 0)
-                    .ok_or_else(|| {
-                        LineError::new(
-                            line_no,
-                            ErrorCode::InvalidPrice,
-                            "Harga harus berupa bilangan bulat, tidak boleh negatif.",
-                        )
-                    })?,
+                price: price_of(line_no, price)?,
                 stock: whole_number(stock)
                     .and_then(|d| d.to_i64())
                     .filter(|s| (0..=MAX_QUANTITY).contains(s))
@@ -297,6 +305,19 @@ fn whole_number(n: &Number) -> Option<Decimal> {
     to_decimal(n).filter(|d| d.fract().is_zero())
 }
 
+fn price_of(line_no: u32, n: &Number) -> Result<i64, LineError> {
+    whole_number(n)
+        .and_then(|d| d.to_i64())
+        .filter(|p| *p >= 0)
+        .ok_or_else(|| {
+            LineError::new(
+                line_no,
+                ErrorCode::InvalidPrice,
+                "Harga harus berupa bilangan bulat, tidak boleh negatif.",
+            )
+        })
+}
+
 fn quantity_of(line_no: u32, n: &Number) -> Result<Decimal, LineError> {
     let invalid = |msg: String| LineError::new(line_no, ErrorCode::InvalidQuantity, msg);
     let d = to_decimal(n).ok_or_else(|| invalid("Jumlah tidak valid.".into()))?;
@@ -326,11 +347,20 @@ mod tests {
             {"line_no": 2, "op": "create_product", "name": "Es  Teh", "price": 5000, "stock": 10},
             {"line_no": 4, "op": "restock", "product": "a", "quantity": 2.0},
             {"line_no": 5, "op": "adjust_down", "product": "a", "quantity": 1},
+            {"line_no": 6, "op": "set_price", "product": "a", "price": 6000},
         ]))
         .validate()
         .expect("valid");
         let nos: Vec<u32> = batch.ops.iter().map(Op::line_no).collect();
-        assert_eq!(nos, [1, 2, 3, 4, 5]);
+        assert_eq!(nos, [1, 2, 3, 4, 5, 6]);
+        assert_eq!(
+            batch.ops[5],
+            Op::SetPrice {
+                line_no: 6,
+                key: "a".into(),
+                price: 6000
+            }
+        );
         assert_eq!(
             batch.ops[0],
             Op::Sale {

@@ -178,6 +178,26 @@ pub async fn update(
     Ok(product)
 }
 
+/// Sets the price of one of the user's products (same price rule as `update`).
+pub async fn set_price(
+    client: &impl GenericClient,
+    user_id: Uuid,
+    id: i64,
+    price: i64,
+) -> AppResult<()> {
+    non_negative_money("price", price)?;
+    let n = client
+        .execute(
+            "UPDATE products SET price = $3 WHERE id = $1 AND user_id = $2",
+            &[&id, &user_id, &price],
+        )
+        .await?;
+    if n != 1 {
+        return Err(AppError::not_found());
+    }
+    Ok(())
+}
+
 /// Deletes one of the user's products (movements cascade, sale snapshots stay).
 /// Returns the deleted row's photo key: `None` when there is no such product,
 /// `Some(None)` when it had no photo. After commit, pass the key to

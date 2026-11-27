@@ -159,6 +159,7 @@ pub async fn execute(
             Step::Sale { line_no, .. }
             | Step::Restock { line_no, .. }
             | Step::AdjustDown { line_no, .. }
+            | Step::SetPrice { line_no, .. }
             | Step::CreateProduct { line_no, .. }
             | Step::DeleteProduct { line_no, .. } => *line_no,
         };
@@ -188,6 +189,11 @@ pub async fn execute(
                 } => {
                     let id = resolve(&created, product)?;
                     products::move_stock(tx, id, -quantity, "adjustment", None).await?;
+                    touched.insert(id);
+                }
+                Step::SetPrice { product, price, .. } => {
+                    let id = resolve(&created, product)?;
+                    products::set_price(tx, user_id, id, price).await?;
                     touched.insert(id);
                 }
                 Step::CreateProduct {
