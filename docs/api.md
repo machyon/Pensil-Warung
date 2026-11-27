@@ -515,3 +515,75 @@ Screen "Semua barang terjual".
 - `unsold` is the user's current products with no completed sale in the month, by name.
 - `q` filters both `items` and `unsold` by name: case-insensitive contains, with `%`, `_` and `\` matching literally. `total_qty`, `revenue` and `share_pct` stay whole-month figures whatever `q` is.
 - There is no low-stock flag in v1 ("hampir habis" is dropped, see `docs/note.md`).
+
+## Broadcasts
+
+In-app announcements, no push. Broadcasts are global: every user reads the same feed, so nothing is scoped to the caller. There is no scheduler: a scheduled broadcast counts as sent once its time has passed, worked out when someone reads (the rows are never rewritten). `shown_at` is the sent time, or the scheduled time for a broadcast that became due on its own.
+
+`category` is `update`, `berita`, `info` or `tips`.
+
+### GET /api/v1/broadcasts
+
+Needs `broadcast.read`. The latest 5 that count as sent, newest first.
+
+```json
+[ { "id": 3, "category": "info", "title": "Libur lebaran", "summary": "Layanan tetap jalan.",
+    "has_body": true, "shown_at": "2026-11-27T03:00:00Z" } ]
+```
+
+### GET /api/v1/broadcasts/{id}
+
+Needs `broadcast.read`. The same fields plus `body` (`null` if there is none). `404 not_found` unless it counts as sent (scheduled for later and cancelled ones are hidden).
+
+### Broadcaster routes
+
+`/broadcaster/broadcasts...` need `broadcast.create` (list, create, detail), `broadcast.update` (PATCH) or `broadcast.cancel` (cancel), else `403 forbidden`. Make a broadcaster with `cargo run -- promote <email>` (`demote` reverses it). Both bump the user's `token_version`, so the old token gets `401` and the user logs in again.
+
+Any broadcaster may change or cancel any scheduled broadcast; there is no ownership check.
+
+### GET /api/v1/broadcaster/broadcasts?cursor=&limit=
+
+```json
+{ "recipient_count": 120,
+  "scheduled": [ { "id": 5, "category": "tips", "title": "...", "summary": "...", "has_body": false,
+                   "shown_at": "2026-12-01T01:00:00Z" } ],
+  "sent": { "items": [ { "id": 3, "...": "same fields" } ], "next_cursor": null } }
+```
+
+- `recipient_count` is the number of users with the `user` role.
+- `scheduled` is every broadcast not yet due, soonest first (not paged). `sent` is a page of the ones that count as sent, newest first (`limit` 1 to 100, default 20; `cursor` opaque). Cancelled broadcasts are in neither list.
+
+### POST /api/v1/broadcaster/broadcasts
+
+```json
+{ "category": "info", "title": "Libur lebaran", "summary": "Layanan tetap jalan.",
+  "body": "Isi lengkap (optional)", "send_at": null }
+```
+
+- `title` is 1 to 60 characters and `summary` 1 to 120, after trimming. A blank `body` becomes `null`. Errors: `422 invalid_value` with `details.field`.
+- `send_at: null` (or missing) sends now. An RFC 3339 time schedules it, and it must be in the future: otherwise `422 time_passed`. There is no upper limit.
+
+`201 Created` with the detail object below.
+
+### GET /api/v1/broadcaster/broadcasts/{id}
+
+Any broadcast, including cancelled ones.
+
+```json
+{ "id": 5, "category": "tips", "title": "...", "summary": "...", "has_body": true, "body": "...",
+  "shown_at": "2026-12-01T01:00:00Z", "effective_status": "scheduled",
+  "created_at": "2026-11-27T03:00:00Z", "created_by_name": "Admin",
+  "cancelled_at": null, "cancelled_by_name": null }
+```
+
+`effective_status` is `cancelled`, `sent` or `scheduled`, as worked out above. Errors: `not_found` (404).
+
+### PATCH /api/v1/broadcaster/broadcasts/{id}
+
+"Ubah". Any of `category`, `title`, `summary`, `body` (blank clears it) and `send_at`, with the same rules as create. `send_at` has three cases: missing keeps the schedule, a future time reschedules, and `null` sends it now. Other fields in the same request are applied too. An empty body is `422 nothing_to_update`. `200 OK` with the detail object.
+
+Only a scheduled broadcast that is not yet due can change. Otherwise: `404 not_found` if it does not exist, or `409 not_editable` if it was already sent, cancelled or has just become due. To correct a sent broadcast, send a new one.
+
+### POST /api/v1/broadcaster/broadcasts/{id}/cancel
+
+"Batalkan". No body. Records who cancelled and when. `200 OK` with the detail object, with the same `404` and `409 not_editable` rules as PATCH.

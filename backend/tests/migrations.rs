@@ -25,7 +25,7 @@ async fn migrations_apply_once_and_create_the_schema() {
 
     assert_eq!(
         count("SELECT count(*) FROM refinery_schema_history").await,
-        2
+        3
     );
 
     // roles, permissions, role_permission, users, auth_identities, products,

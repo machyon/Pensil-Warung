@@ -4,6 +4,7 @@
 pub mod account;
 pub mod analytics;
 pub mod auth;
+pub mod broadcasts;
 pub mod catat;
 pub mod common;
 pub mod config;
