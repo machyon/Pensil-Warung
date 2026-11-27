@@ -79,6 +79,15 @@ impl NewProduct {
     }
 }
 
+/// A movement note: trimmed, blank is none, at most 200 characters.
+pub fn clean_note(note: Option<&str>) -> AppResult<Option<String>> {
+    let note = note.map(str::trim).filter(|n| !n.is_empty());
+    if let Some(n) = note {
+        max_len("note", n, 200)?;
+    }
+    Ok(note.map(str::to_owned))
+}
+
 /// A validated PATCH: at least one field, normalized name, `note` only with `stock`.
 pub struct ProductPatch {
     name: Option<String>,
@@ -106,15 +115,12 @@ impl ProductPatch {
         }
         // Reuse the create rules; the placeholders for omitted fields always pass.
         let checked = NewProduct::new(name.unwrap_or("x"), price.unwrap_or(0), stock.unwrap_or(0))?;
-        let note = note.map(str::trim).filter(|n| !n.is_empty());
-        if let Some(n) = note {
-            max_len("note", n, 200)?;
-        }
+        let note = clean_note(note)?;
         Ok(ProductPatch {
             name: name.map(|_| checked.name),
             price,
             stock: stock.map(|_| checked.stock),
-            note: note.map(str::to_owned),
+            note,
         })
     }
 }

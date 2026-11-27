@@ -185,10 +185,13 @@ pub async fn execute(
                     touched.insert(id);
                 }
                 Step::AdjustDown {
-                    product, quantity, ..
+                    product,
+                    quantity,
+                    note,
+                    ..
                 } => {
                     let id = resolve(&created, product)?;
-                    products::move_stock(tx, id, -quantity, "adjustment", None).await?;
+                    products::move_stock(tx, id, -quantity, "adjustment", note.as_deref()).await?;
                     touched.insert(id);
                 }
                 Step::SetPrice { product, price, .. } => {

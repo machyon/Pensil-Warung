@@ -14,6 +14,7 @@ use uuid::Uuid;
 use crate::common::names::{name_key, normalize_product_name};
 use crate::common::validate::{MAX_QUANTITY, whole_quantity};
 use crate::error::{AppError, ErrorCode};
+use crate::products;
 use crate::transactions::dto::TransactionResponse;
 
 const MAX_OPS: usize = 200;
@@ -45,6 +46,7 @@ pub enum OpDto {
         line_no: u32,
         product: String,
         quantity: Number,
+        note: Option<String>,
     },
     SetPrice {
         line_no: u32,
@@ -129,10 +131,12 @@ pub enum Op {
         key: String,
         quantity: Decimal,
     },
+    /// `note` is trimmed, at most 200 characters, `None` when blank.
     AdjustDown {
         line_no: u32,
         key: String,
         quantity: Decimal,
+        note: Option<String>,
     },
     SetPrice {
         line_no: u32,
@@ -238,11 +242,21 @@ fn validate_op(dto: &OpDto) -> Result<Op, LineError> {
             quantity: quantity_of(line_no, quantity)?,
         }),
         OpDto::AdjustDown {
-            product, quantity, ..
+            product,
+            quantity,
+            note,
+            ..
         } => Ok(Op::AdjustDown {
             line_no,
             key: product_key(line_no, product)?,
             quantity: quantity_of(line_no, quantity)?,
+            note: products::clean_note(note.as_deref()).map_err(|_| {
+                LineError::new(
+                    line_no,
+                    ErrorCode::InvalidValue,
+                    "Alasan maksimal 200 karakter.",
+                )
+            })?,
         }),
         OpDto::SetPrice { product, price, .. } => Ok(Op::SetPrice {
             line_no,
@@ -348,11 +362,12 @@ mod tests {
             {"line_no": 4, "op": "restock", "product": "a", "quantity": 2.0},
             {"line_no": 5, "op": "adjust_down", "product": "a", "quantity": 1},
             {"line_no": 6, "op": "set_price", "product": "a", "price": 6000},
+            {"line_no": 7, "op": "adjust_down", "product": "a", "quantity": 1, "note": "  basi "},
         ]))
         .validate()
         .expect("valid");
         let nos: Vec<u32> = batch.ops.iter().map(Op::line_no).collect();
-        assert_eq!(nos, [1, 2, 3, 4, 5, 6]);
+        assert_eq!(nos, [1, 2, 3, 4, 5, 6, 7]);
         assert_eq!(
             batch.ops[5],
             Op::SetPrice {
@@ -361,6 +376,7 @@ mod tests {
                 price: 6000
             }
         );
+        assert!(matches!(&batch.ops[6], Op::AdjustDown { note: Some(n), .. } if n == "basi"));
         assert_eq!(
             batch.ops[0],
             Op::Sale {

@@ -47,6 +47,7 @@ pub enum Step {
         line_no: u32,
         product: ProductRef,
         quantity: Decimal,
+        note: Option<String>,
     },
     /// `products::set_price`.
     SetPrice {
@@ -191,10 +192,15 @@ pub fn plan(ops: &[Op], products: Vec<ProductSnapshot>) -> Result<Plan, Vec<Line
                         line_total: lt,
                     });
                 } else {
+                    let note = match op {
+                        Op::AdjustDown { note, .. } => note.clone(),
+                        _ => None,
+                    };
                     steps.push(Step::AdjustDown {
                         line_no,
                         product: sim.product,
                         quantity: *quantity,
+                        note,
                     });
                 }
                 sim.stock -= quantity;
@@ -401,6 +407,7 @@ mod tests {
                     line_no: 3,
                     key: "kopi".into(),
                     quantity: q(2),
+                    note: None,
                 },
                 restock(4, "hantu", 1),
                 sale(5, "kopi", 1),
@@ -449,6 +456,7 @@ mod tests {
                     line_no: 1,
                     key: "kopi".into(),
                     quantity: q(2),
+                    note: None,
                 },
                 sale(2, "kopi", 1),
             ],

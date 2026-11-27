@@ -533,6 +533,7 @@ async fn executor_maps_a_stock_violation_to_the_failing_line() {
             line_no: 2,
             product: ProductRef::Existing(nasi),
             quantity: Decimal::from(4),
+            note: None,
         },
     ];
     let (status, lines) = run_plan(&app, uid, steps).await;
