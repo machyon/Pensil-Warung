@@ -363,7 +363,7 @@ Response `201 Created`:
 ```
 
 - `transaction` is `null` when the batch had no sale. Its shape is the transaction object that the transaction endpoints reuse.
-- `products_changed`: every product the batch touched (sold, restocked, adjusted or created) and that still exists, with its final price and stock, ordered by id. Use it to refresh the local stock.
+- `products_changed`: every product the batch touched (sold, restocked, adjusted, repriced or created) and that still exists, with its final price and stock, ordered by id. Use it to refresh the local stock.
 - `products_deleted`: ids of existing products the batch deleted. A product created and deleted in the same batch appears in neither list.
 
 Replay: if the user already has a transaction with this `client_uuid`, nothing is executed and the answer is `200 OK` with the stored transaction. `products_changed` then lists the products in that transaction's items that still exist, with their current price and stock (which may differ from the first answer), and `products_deleted` is `[]`. The ops in a replayed request are not compared with the stored ones. A concurrent duplicate is treated the same way.
