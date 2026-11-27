@@ -333,7 +333,7 @@ fn price_of(line_no: u32, n: &Number) -> Result<i64, LineError> {
         })
 }
 
-fn quantity_of(line_no: u32, n: &Number) -> Result<Decimal, LineError> {
+pub(crate) fn quantity_of(line_no: u32, n: &Number) -> Result<Decimal, LineError> {
     let invalid = |msg: String| LineError::new(line_no, ErrorCode::InvalidQuantity, msg);
     let d = to_decimal(n).ok_or_else(|| invalid("Jumlah tidak valid.".into()))?;
     whole_quantity("Jumlah", d).map_err(|e| invalid(e.message().to_owned()))?;

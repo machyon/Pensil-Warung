@@ -4,6 +4,7 @@ use axum::Json;
 use axum::Router;
 use axum::body::Bytes;
 use axum::extract::State;
+use axum::http::StatusCode;
 use axum::routing::{get, post};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -11,10 +12,11 @@ use time::Date;
 use time::macros::format_description;
 
 use super::dto::{DaySummary, TransactionListItem, TransactionResponse};
+use super::revise::{ReviseRequest, revise};
 use super::{day_summary, find, list_day, void};
 use crate::auth::extractor::AuthUser;
 use crate::auth::perms::Perm;
-use crate::common::extract::{ApiPath, ApiQuery};
+use crate::common::extract::{ApiJson, ApiPath, ApiQuery};
 use crate::common::pagination::{Cursor, Page, clamp_limit};
 use crate::common::time::{today_wib, wib_day_bounds};
 use crate::common::validate::max_len;
@@ -26,6 +28,7 @@ pub fn routes() -> Router<AppState> {
         .route("/transactions", get(list))
         .route("/transactions/{id}", get(detail))
         .route("/transactions/{id}/void", post(void_one))
+        .route("/transactions/{id}/revise", post(revise_one))
 }
 
 #[derive(Deserialize)]
@@ -120,4 +123,21 @@ async fn void_one(
     }
     let client = state.pool.get().await?;
     Ok(Json(void(&**client, user.id, id, reason).await?))
+}
+
+async fn revise_one(
+    State(state): State<AppState>,
+    user: AuthUser,
+    ApiPath(id): ApiPath<i64>,
+    ApiJson(req): ApiJson<ReviseRequest>,
+) -> Result<(StatusCode, Json<TransactionResponse>), AppError> {
+    state.perms.require(&user, Perm::TransactionCreate)?;
+    state.perms.require(&user, Perm::TransactionVoid)?;
+    let (created, t) = revise(&state.pool, user.id, id, req).await?;
+    let status = if created {
+        StatusCode::CREATED
+    } else {
+        StatusCode::OK
+    };
+    Ok((status, Json(t)))
 }

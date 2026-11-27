@@ -3,6 +3,7 @@
 
 pub mod dto;
 pub mod handlers;
+pub mod revise;
 
 use std::collections::HashMap;
 
@@ -13,7 +14,8 @@ use uuid::Uuid;
 
 use crate::common::pagination::Cursor;
 use crate::error::{AppError, AppResult, ErrorCode};
-use dto::{DaySummary, ItemResponse, TransactionListItem, TransactionResponse};
+use crate::products::dto::rfc3339;
+use dto::{DaySummary, HistoryEntry, ItemResponse, TransactionListItem, TransactionResponse};
 
 /// Items named in a list row's `summary` before " +N lainnya".
 const SUMMARY_ITEMS: usize = 3;
@@ -34,10 +36,16 @@ fn summary(items: &[(String, i64)]) -> String {
 
 /// Columns `TransactionResponse::new` reads.
 pub const TRANSACTION_COLUMNS: &str =
-    "id, raw_text, total, status::text AS status, occurred_at, voided_at, void_reason";
+    "id, raw_text, total, status::text AS status, occurred_at, voided_at, void_reason, replaces_id,
+     (SELECT r.id FROM transactions r WHERE r.replaces_id = transactions.id) AS replaced_by_id";
 
-/// Adds a transaction row's items (in `line_no` order) to build the response.
-pub async fn with_items(client: &impl GenericClient, row: &Row) -> AppResult<TransactionResponse> {
+/// Adds a transaction row's items (in `line_no` order) and its older versions
+/// to build the response.
+pub async fn with_items(
+    client: &impl GenericClient,
+    user_id: Uuid,
+    row: &Row,
+) -> AppResult<TransactionResponse> {
     let items = client
         .query(
             "SELECT id, line_no, product_id, product_name, unit_price, quantity, line_total
@@ -46,7 +54,58 @@ pub async fn with_items(client: &impl GenericClient, row: &Row) -> AppResult<Tra
         )
         .await?;
     let items = items.iter().map(ItemResponse::from).collect();
-    Ok(TransactionResponse::new(row, items))
+    let history = history(client, user_id, row.get("replaces_id")).await?;
+    Ok(TransactionResponse::new(row, items, history))
+}
+
+/// Every version before `replaces_id`, newest first.
+async fn history(
+    client: &impl GenericClient,
+    user_id: Uuid,
+    replaces_id: Option<i64>,
+) -> AppResult<Vec<HistoryEntry>> {
+    let Some(start) = replaces_id else {
+        return Ok(Vec::new());
+    };
+    let rows = client
+        .query(
+            "WITH RECURSIVE chain (id, replaces_id, depth) AS (
+                 SELECT id, replaces_id, 1 FROM transactions WHERE id = $1 AND user_id = $2
+                 UNION ALL
+                 SELECT t.id, t.replaces_id, c.depth + 1
+                   FROM transactions t JOIN chain c ON t.id = c.replaces_id
+                  WHERE t.user_id = $2)
+             SELECT t.id, t.raw_text, t.total, t.occurred_at, t.voided_at
+               FROM chain c JOIN transactions t ON t.id = c.id ORDER BY c.depth",
+            &[&start, &user_id],
+        )
+        .await?;
+    let ids: Vec<i64> = rows.iter().map(|r| r.get("id")).collect();
+    let item_rows = client
+        .query(
+            "SELECT transaction_id, id, line_no, product_id, product_name, unit_price, quantity, line_total
+               FROM transaction_items WHERE transaction_id = ANY($1) ORDER BY transaction_id, line_no",
+            &[&ids],
+        )
+        .await?;
+    Ok(rows
+        .iter()
+        .map(|r| {
+            let id: i64 = r.get("id");
+            HistoryEntry {
+                id,
+                raw_text: r.get("raw_text"),
+                total: r.get("total"),
+                occurred_at: rfc3339(r.get::<_, OffsetDateTime>("occurred_at")),
+                revised_at: r.get::<_, Option<OffsetDateTime>>("voided_at").map(rfc3339),
+                items: item_rows
+                    .iter()
+                    .filter(|i| i.get::<_, i64>("transaction_id") == id)
+                    .map(ItemResponse::from)
+                    .collect(),
+            }
+        })
+        .collect())
 }
 
 /// The user's transaction with its items; `None` if it is not theirs.
@@ -64,7 +123,7 @@ pub async fn find(
         )
         .await?;
     match row {
-        Some(row) => Ok(Some(with_items(client, &row).await?)),
+        Some(row) => Ok(Some(with_items(client, user_id, &row).await?)),
         None => Ok(None),
     }
 }
@@ -107,6 +166,7 @@ pub async fn list_day(
             "SELECT id, occurred_at, total, status::text AS status
                FROM transactions
               WHERE user_id = $1 AND occurred_at >= $2 AND occurred_at < $3
+                AND NOT EXISTS (SELECT 1 FROM transactions r WHERE r.replaces_id = transactions.id)
                 AND ($4::timestamptz IS NULL
                      OR (occurred_at, id) < ($4::timestamptz, $5::bigint))
               ORDER BY occurred_at DESC, id DESC
