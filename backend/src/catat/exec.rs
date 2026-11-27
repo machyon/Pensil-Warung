@@ -95,7 +95,7 @@ pub async fn find_by_client_uuid(
     else {
         return Ok(None);
     };
-    Ok(Some(with_items(client, &row).await?))
+    Ok(Some(with_items(client, user_id, &row).await?))
 }
 
 /// The user's products among `ids` with their current stock, ordered by id.
