@@ -26,6 +26,8 @@ pub struct WeekdayAvg {
 
 #[derive(Serialize)]
 pub struct TopItem {
+    /// `null` once the product was deleted.
+    pub product_id: Option<i64>,
     pub name: String,
     pub qty: i64,
     pub revenue: i64,

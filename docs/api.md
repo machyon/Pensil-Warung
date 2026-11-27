@@ -468,7 +468,7 @@ Grouping and names: items are grouped by product when the product still exists, 
   "previous": { "month": "2026-10", "revenue": 16800000, "change_pct": 8.2 },
   "trend": [ { "month": "2025-12", "revenue": 21400000 } ],
   "weekday_avg": [ { "weekday": 1, "avg_revenue": 887000 } ],
-  "top_items": [ { "name": "Es teh manis", "qty": 512, "revenue": 2560000, "stock": 37 } ]
+  "top_items": [ { "product_id": 12, "name": "Es teh manis", "qty": 512, "revenue": 2560000, "stock": 37 } ]
 }
 ```
 
@@ -476,7 +476,7 @@ Grouping and names: items are grouped by product when the product still exists, 
 - `previous` is the same day range of the previous month (clamped to its length). `change_pct` is `(revenue - previous) / previous * 100`, rounded half away from zero to one decimal, and `null` when the previous revenue is 0.
 - `trend` has exactly 12 entries, oldest first, ending with `month` (which may be unfinished). Months without sales have `revenue: 0`. The design showed 6 bars, so the client must show 12.
 - `weekday_avg` is `null` while the month has fewer than 14 days with sales. Otherwise it has 7 entries (`weekday` 1 = Monday to 7 = Sunday). Each average is over every calendar day from the 1st to `through_day`, and days without sales count as Rp0 (Mondays = revenue on all Mondays so far divided by the number of Mondays so far).
-- `top_items`: the top 5 over days 1 to `through_day`.
+- `top_items`: the top 5 over days 1 to `through_day`. `product_id` is `null` once the product was deleted.
 
 ### GET /api/v1/analytics/month/days?month=&cursor=&limit=
 
