@@ -14,6 +14,7 @@ use uuid::Uuid;
 use crate::common::names::{name_key, normalize_product_name};
 use crate::common::validate::{MAX_QUANTITY, whole_quantity};
 use crate::error::{AppError, ErrorCode};
+use crate::products;
 use crate::transactions::dto::TransactionResponse;
 
 const MAX_OPS: usize = 200;
@@ -45,6 +46,12 @@ pub enum OpDto {
         line_no: u32,
         product: String,
         quantity: Number,
+        note: Option<String>,
+    },
+    SetPrice {
+        line_no: u32,
+        product: String,
+        price: Number,
     },
     CreateProduct {
         line_no: u32,
@@ -64,6 +71,7 @@ impl OpDto {
             OpDto::Sale { line_no, .. }
             | OpDto::Restock { line_no, .. }
             | OpDto::AdjustDown { line_no, .. }
+            | OpDto::SetPrice { line_no, .. }
             | OpDto::CreateProduct { line_no, .. }
             | OpDto::DeleteProduct { line_no, .. } => *line_no,
         }
@@ -98,6 +106,7 @@ pub fn lines_invalid(lines: &[LineError]) -> AppError {
 pub struct ProductStock {
     pub id: i64,
     pub name: String,
+    pub price: i64,
     pub stock: i64,
 }
 
@@ -123,10 +132,17 @@ pub enum Op {
         key: String,
         quantity: Decimal,
     },
+    /// `note` is trimmed, at most 200 characters, `None` when blank.
     AdjustDown {
         line_no: u32,
         key: String,
         quantity: Decimal,
+        note: Option<String>,
+    },
+    SetPrice {
+        line_no: u32,
+        key: String,
+        price: i64,
     },
     /// `name` is normalized (trimmed, single spaces), 1-60 characters.
     CreateProduct {
@@ -147,6 +163,7 @@ impl Op {
             Op::Sale { line_no, .. }
             | Op::Restock { line_no, .. }
             | Op::AdjustDown { line_no, .. }
+            | Op::SetPrice { line_no, .. }
             | Op::CreateProduct { line_no, .. }
             | Op::DeleteProduct { line_no, .. } => *line_no,
         }
@@ -226,11 +243,26 @@ fn validate_op(dto: &OpDto) -> Result<Op, LineError> {
             quantity: quantity_of(line_no, quantity)?,
         }),
         OpDto::AdjustDown {
-            product, quantity, ..
+            product,
+            quantity,
+            note,
+            ..
         } => Ok(Op::AdjustDown {
             line_no,
             key: product_key(line_no, product)?,
             quantity: quantity_of(line_no, quantity)?,
+            note: products::clean_note(note.as_deref()).map_err(|_| {
+                LineError::new(
+                    line_no,
+                    ErrorCode::InvalidValue,
+                    "Alasan maksimal 200 karakter.",
+                )
+            })?,
+        }),
+        OpDto::SetPrice { product, price, .. } => Ok(Op::SetPrice {
+            line_no,
+            key: product_key(line_no, product)?,
+            price: price_of(line_no, price)?,
         }),
         OpDto::DeleteProduct { product, .. } => Ok(Op::DeleteProduct {
             line_no,
@@ -250,16 +282,7 @@ fn validate_op(dto: &OpDto) -> Result<Op, LineError> {
             Ok(Op::CreateProduct {
                 line_no,
                 name,
-                price: whole_number(price)
-                    .and_then(|d| d.to_i64())
-                    .filter(|p| *p >= 0)
-                    .ok_or_else(|| {
-                        LineError::new(
-                            line_no,
-                            ErrorCode::InvalidPrice,
-                            "Harga harus berupa bilangan bulat, tidak boleh negatif.",
-                        )
-                    })?,
+                price: price_of(line_no, price)?,
                 stock: whole_number(stock)
                     .and_then(|d| d.to_i64())
                     .filter(|s| (0..=MAX_QUANTITY).contains(s))
@@ -297,6 +320,19 @@ fn whole_number(n: &Number) -> Option<Decimal> {
     to_decimal(n).filter(|d| d.fract().is_zero())
 }
 
+fn price_of(line_no: u32, n: &Number) -> Result<i64, LineError> {
+    whole_number(n)
+        .and_then(|d| d.to_i64())
+        .filter(|p| *p >= 0)
+        .ok_or_else(|| {
+            LineError::new(
+                line_no,
+                ErrorCode::InvalidPrice,
+                "Harga harus berupa bilangan bulat, tidak boleh negatif.",
+            )
+        })
+}
+
 fn quantity_of(line_no: u32, n: &Number) -> Result<Decimal, LineError> {
     let invalid = |msg: String| LineError::new(line_no, ErrorCode::InvalidQuantity, msg);
     let d = to_decimal(n).ok_or_else(|| invalid("Jumlah tidak valid.".into()))?;
@@ -326,11 +362,22 @@ mod tests {
             {"line_no": 2, "op": "create_product", "name": "Es  Teh", "price": 5000, "stock": 10},
             {"line_no": 4, "op": "restock", "product": "a", "quantity": 2.0},
             {"line_no": 5, "op": "adjust_down", "product": "a", "quantity": 1},
+            {"line_no": 6, "op": "set_price", "product": "a", "price": 6000},
+            {"line_no": 7, "op": "adjust_down", "product": "a", "quantity": 1, "note": "  basi "},
         ]))
         .validate()
         .expect("valid");
         let nos: Vec<u32> = batch.ops.iter().map(Op::line_no).collect();
-        assert_eq!(nos, [1, 2, 3, 4, 5]);
+        assert_eq!(nos, [1, 2, 3, 4, 5, 6, 7]);
+        assert_eq!(
+            batch.ops[5],
+            Op::SetPrice {
+                line_no: 6,
+                key: "a".into(),
+                price: 6000
+            }
+        );
+        assert!(matches!(&batch.ops[6], Op::AdjustDown { note: Some(n), .. } if n == "basi"));
         assert_eq!(
             batch.ops[0],
             Op::Sale {

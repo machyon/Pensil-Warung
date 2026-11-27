@@ -79,6 +79,15 @@ impl NewProduct {
     }
 }
 
+/// A movement note: trimmed, blank is none, at most 200 characters.
+pub fn clean_note(note: Option<&str>) -> AppResult<Option<String>> {
+    let note = note.map(str::trim).filter(|n| !n.is_empty());
+    if let Some(n) = note {
+        max_len("note", n, 200)?;
+    }
+    Ok(note.map(str::to_owned))
+}
+
 /// A validated PATCH: at least one field, normalized name, `note` only with `stock`.
 pub struct ProductPatch {
     name: Option<String>,
@@ -106,15 +115,12 @@ impl ProductPatch {
         }
         // Reuse the create rules; the placeholders for omitted fields always pass.
         let checked = NewProduct::new(name.unwrap_or("x"), price.unwrap_or(0), stock.unwrap_or(0))?;
-        let note = note.map(str::trim).filter(|n| !n.is_empty());
-        if let Some(n) = note {
-            max_len("note", n, 200)?;
-        }
+        let note = clean_note(note)?;
         Ok(ProductPatch {
             name: name.map(|_| checked.name),
             price,
             stock: stock.map(|_| checked.stock),
-            note: note.map(str::to_owned),
+            note,
         })
     }
 }
@@ -176,6 +182,26 @@ pub async fn update(
     let product = get(&tx, user_id, id).await?;
     tx.commit().await?;
     Ok(product)
+}
+
+/// Sets the price of one of the user's products (same price rule as `update`).
+pub async fn set_price(
+    client: &impl GenericClient,
+    user_id: Uuid,
+    id: i64,
+    price: i64,
+) -> AppResult<()> {
+    non_negative_money("price", price)?;
+    let n = client
+        .execute(
+            "UPDATE products SET price = $3 WHERE id = $1 AND user_id = $2",
+            &[&id, &user_id, &price],
+        )
+        .await?;
+    if n != 1 {
+        return Err(AppError::not_found());
+    }
+    Ok(())
 }
 
 /// Deletes one of the user's products (movements cascade, sale snapshots stay).

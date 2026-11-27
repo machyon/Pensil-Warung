@@ -336,7 +336,8 @@ Ops (`product` is matched against the user's product names ignoring case and ext
 |---|---|---|
 | `sale` | `product`, `quantity` | An item on the batch's one transaction. The price is always the product's current `price` |
 | `restock` | `product`, `quantity` | Stock movement `restock`, `+quantity`. No transaction |
-| `adjust_down` | `product`, `quantity` | Stock movement `adjustment`, `-quantity` (damaged or lost goods). No transaction |
+| `adjust_down` | `product`, `quantity`, optional `note` | Stock movement `adjustment`, `-quantity` (damaged or lost goods). No transaction. `note` is trimmed, blank counts as none, over 200 characters is line error `invalid_value`; it is stored on the movement |
+| `set_price` | `product`, `price` | Sets the product's `price` (a whole number >= 0, else `invalid_price`). Later `sale` lines in the batch use the new price, earlier ones the old |
 | `create_product` | `name`, `price`, `stock` | A new product. A `stock` above 0 gets an `initial` movement |
 | `delete_product` | `product` | Hard delete, plus the photo object. Past sale items keep their snapshot with `product_id: null` |
 
@@ -356,16 +357,16 @@ Response `201 Created`:
         "unit_price": 15000, "quantity": 2, "line_total": 30000 }
     ]
   },
-  "products_changed": [ { "id": 5, "name": "Nasi goreng", "stock": 8 } ],
+  "products_changed": [ { "id": 5, "name": "Nasi goreng", "price": 15000, "stock": 8 } ],
   "products_deleted": [ 9 ]
 }
 ```
 
 - `transaction` is `null` when the batch had no sale. Its shape is the transaction object that the transaction endpoints reuse.
-- `products_changed`: every product the batch touched (sold, restocked, adjusted or created) and that still exists, with its final stock, ordered by id. Use it to refresh the local stock.
+- `products_changed`: every product the batch touched (sold, restocked, adjusted, repriced or created) and that still exists, with its final price and stock, ordered by id. Use it to refresh the local stock.
 - `products_deleted`: ids of existing products the batch deleted. A product created and deleted in the same batch appears in neither list.
 
-Replay: if the user already has a transaction with this `client_uuid`, nothing is executed and the answer is `200 OK` with the stored transaction. `products_changed` then lists the products in that transaction's items that still exist, with their current stock (which may differ from the first answer), and `products_deleted` is `[]`. The ops in a replayed request are not compared with the stored ones. A concurrent duplicate is treated the same way.
+Replay: if the user already has a transaction with this `client_uuid`, nothing is executed and the answer is `200 OK` with the stored transaction. `products_changed` then lists the products in that transaction's items that still exist, with their current price and stock (which may differ from the first answer), and `products_deleted` is `[]`. The ops in a replayed request are not compared with the stored ones. A concurrent duplicate is treated the same way.
 
 Command-only batches are not retry-safe: a batch with no `sale` line stores no transaction, so a retry with the same `client_uuid` runs again (a repeated restock adds the stock twice). This is accepted for now because there is no offline mode.
 
@@ -393,8 +394,9 @@ One command per line, case-insensitive. The client checks the prefixes in this o
 | Typed line | Op |
 |---|---|
 | `tambah stok <name> <qty>` | `restock` |
-| `hapus stok <name> <qty>` | `adjust_down` |
+| `hapus stok <name> <qty> [alasan <reason>]` | `adjust_down` (with `note`) |
 | `buat produk <name> harga <price> stok <stock>` | `create_product` |
+| `ubah harga <name> <price>` | `set_price` |
 | `hapus <name>` | `delete_product` |
 | `<name> <qty>` | `sale` |
 

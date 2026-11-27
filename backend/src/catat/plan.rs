@@ -47,6 +47,13 @@ pub enum Step {
         line_no: u32,
         product: ProductRef,
         quantity: Decimal,
+        note: Option<String>,
+    },
+    /// `products::set_price`.
+    SetPrice {
+        line_no: u32,
+        product: ProductRef,
+        price: i64,
     },
     /// `products::create`; `name` is already normalized and valid.
     CreateProduct {
@@ -147,6 +154,17 @@ pub fn plan(ops: &[Op], products: Vec<ProductSnapshot>) -> Result<Plan, Vec<Line
                 }
                 None => fail(ErrorCode::ProductNotFound, "Produk tidak ditemukan."),
             },
+            Op::SetPrice { key, price, .. } => match state.get_mut(key) {
+                Some(sim) => {
+                    sim.price = *price;
+                    steps.push(Step::SetPrice {
+                        line_no,
+                        product: sim.product,
+                        price: *price,
+                    });
+                }
+                None => fail(ErrorCode::ProductNotFound, "Produk tidak ditemukan."),
+            },
             Op::AdjustDown { key, quantity, .. } | Op::Sale { key, quantity, .. } => {
                 let Some(sim) = state.get_mut(key) else {
                     fail(ErrorCode::ProductNotFound, "Produk tidak ditemukan.");
@@ -174,10 +192,15 @@ pub fn plan(ops: &[Op], products: Vec<ProductSnapshot>) -> Result<Plan, Vec<Line
                         line_total: lt,
                     });
                 } else {
+                    let note = match op {
+                        Op::AdjustDown { note, .. } => note.clone(),
+                        _ => None,
+                    };
                     steps.push(Step::AdjustDown {
                         line_no,
                         product: sim.product,
                         quantity: *quantity,
+                        note,
                     });
                 }
                 sim.stock -= quantity;
@@ -384,6 +407,7 @@ mod tests {
                     line_no: 3,
                     key: "kopi".into(),
                     quantity: q(2),
+                    note: None,
                 },
                 restock(4, "hantu", 1),
                 sale(5, "kopi", 1),
@@ -432,6 +456,7 @@ mod tests {
                     line_no: 1,
                     key: "kopi".into(),
                     quantity: q(2),
+                    note: None,
                 },
                 sale(2, "kopi", 1),
             ],
@@ -452,6 +477,79 @@ mod tests {
             }],
         );
         assert_eq!(errs(r), [(1, ErrorCode::InvalidValue)]);
+    }
+
+    fn set_price(line_no: u32, key: &str, price: i64) -> Op {
+        Op::SetPrice {
+            line_no,
+            key: name_key(key),
+            price,
+        }
+    }
+
+    #[test]
+    fn set_price_applies_to_later_sales_only() {
+        let p = plan(
+            &[
+                sale(1, "kopi", 1),
+                set_price(2, "kopi", 2_000),
+                sale(3, "kopi", 1),
+            ],
+            vec![snap(1, "Kopi", 1_000, 5)],
+        )
+        .unwrap();
+        assert_eq!(p.total, 3_000);
+        assert!(matches!(
+            p.steps[0],
+            Step::Sale {
+                unit_price: 1_000,
+                ..
+            }
+        ));
+        assert!(matches!(p.steps[1], Step::SetPrice { price: 2_000, .. }));
+        assert!(matches!(
+            p.steps[2],
+            Step::Sale {
+                unit_price: 2_000,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn set_price_on_batch_product_and_unknown_or_deleted() {
+        let p = plan(
+            &[
+                create(1, "Teh", 1_000, 5),
+                set_price(2, "teh", 3_000),
+                sale(3, "teh", 1),
+            ],
+            vec![],
+        )
+        .unwrap();
+        assert_eq!(p.total, 3_000);
+        assert!(matches!(
+            p.steps[1],
+            Step::SetPrice {
+                product: ProductRef::Created(1),
+                ..
+            }
+        ));
+        let r = plan(
+            &[
+                set_price(1, "hantu", 1),
+                delete(2, "kopi"),
+                set_price(3, "kopi", 1),
+            ],
+            vec![snap(1, "Kopi", 1, 1)],
+        );
+        assert_eq!(
+            errs(r),
+            [
+                (1, ErrorCode::ProductNotFound),
+                (3, ErrorCode::ProductNotFound)
+            ]
+        );
     }
 
     #[test]

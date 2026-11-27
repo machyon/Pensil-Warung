@@ -107,7 +107,7 @@ pub async fn product_stocks(
 ) -> AppResult<Vec<ProductStock>> {
     let rows = client
         .query(
-            "SELECT id, name, stock FROM products
+            "SELECT id, name, price, stock FROM products
              WHERE user_id = $1 AND id = ANY($2) ORDER BY id",
             &[&user_id, &ids],
         )
@@ -117,6 +117,7 @@ pub async fn product_stocks(
         .map(|r| ProductStock {
             id: r.get("id"),
             name: r.get("name"),
+            price: r.get("price"),
             stock: r.get::<_, Decimal>("stock").to_i64().unwrap_or_default(),
         })
         .collect())
@@ -159,6 +160,7 @@ pub async fn execute(
             Step::Sale { line_no, .. }
             | Step::Restock { line_no, .. }
             | Step::AdjustDown { line_no, .. }
+            | Step::SetPrice { line_no, .. }
             | Step::CreateProduct { line_no, .. }
             | Step::DeleteProduct { line_no, .. } => *line_no,
         };
@@ -184,10 +186,18 @@ pub async fn execute(
                     touched.insert(id);
                 }
                 Step::AdjustDown {
-                    product, quantity, ..
+                    product,
+                    quantity,
+                    note,
+                    ..
                 } => {
                     let id = resolve(&created, product)?;
-                    products::move_stock(tx, id, -quantity, "adjustment", None).await?;
+                    products::move_stock(tx, id, -quantity, "adjustment", note.as_deref()).await?;
+                    touched.insert(id);
+                }
+                Step::SetPrice { product, price, .. } => {
+                    let id = resolve(&created, product)?;
+                    products::set_price(tx, user_id, id, price).await?;
                     touched.insert(id);
                 }
                 Step::CreateProduct {
