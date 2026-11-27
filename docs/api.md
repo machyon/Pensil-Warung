@@ -283,6 +283,12 @@ All fields are optional; `200 OK` with the updated product.
 
 `204 No Content`; `404 not_found` if it is not the user's. A hard delete: the product's stock movements go with it, while past sale items keep their name and price snapshot (their `product_id` becomes null).
 
+### GET /api/v1/products/{id}/movements?cursor=&limit=
+
+`200 OK` with `{ "items": [movement], "next_cursor": null }`: the product's stock ledger, newest first, keyset-paged like the transaction list (`limit` 1-100, default 20; `cursor` is the opaque `next_cursor` of the previous page, a bad one is `422 invalid_value` on `cursor`). `404 not_found` if the product is not the user's.
+
+A movement: `{ "id", "reason", "delta", "stock_after", "note", "created_at", "transaction_id" }`. `reason` is `initial`, `sale`, `void_sale`, `restock` or `adjustment`. `delta` (signed) and `stock_after` are whole numbers. `transaction_id` is the sale the row belongs to, `null` for non-sale rows or when the sale item is gone.
+
 ### Photos
 
 `photo_url` is a presigned URL for the product's photo, or `null` when the product has no photo (or the server has no photo storage). The URL expires after `IMAGE_URL_TTL_SECONDS` (default 3600) and is different on every response, so the client should cache the image by product id plus photo (for example `updated_at` after a photo change), not by URL. Every product response carries it: list, get, create, bulk, patch and the photo PUT.
