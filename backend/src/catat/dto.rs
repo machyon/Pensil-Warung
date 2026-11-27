@@ -106,6 +106,7 @@ pub fn lines_invalid(lines: &[LineError]) -> AppError {
 pub struct ProductStock {
     pub id: i64,
     pub name: String,
+    pub price: i64,
     pub stock: i64,
 }
 

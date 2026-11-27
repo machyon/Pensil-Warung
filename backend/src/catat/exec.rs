@@ -107,7 +107,7 @@ pub async fn product_stocks(
 ) -> AppResult<Vec<ProductStock>> {
     let rows = client
         .query(
-            "SELECT id, name, stock FROM products
+            "SELECT id, name, price, stock FROM products
              WHERE user_id = $1 AND id = ANY($2) ORDER BY id",
             &[&user_id, &ids],
         )
@@ -117,6 +117,7 @@ pub async fn product_stocks(
         .map(|r| ProductStock {
             id: r.get("id"),
             name: r.get("name"),
+            price: r.get("price"),
             stock: r.get::<_, Decimal>("stock").to_i64().unwrap_or_default(),
         })
         .collect())
