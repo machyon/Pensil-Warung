@@ -175,6 +175,7 @@ async fn top_items(
     Ok(rows
         .into_iter()
         .map(|r| TopItem {
+            product_id: r.product_id,
             name: r.name,
             qty: r.qty,
             revenue: r.revenue,
