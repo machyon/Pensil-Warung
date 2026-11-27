@@ -361,7 +361,7 @@ Response `201 Created`:
 
 Replay: if the user already has a transaction with this `client_uuid`, nothing is executed and the answer is `200 OK` with the stored transaction. `products_changed` then lists the products in that transaction's items that still exist, with their current stock (which may differ from the first answer), and `products_deleted` is `[]`. The ops in a replayed request are not compared with the stored ones. A concurrent duplicate is treated the same way.
 
-Command-only batches are not retry-safe: a batch with no `sale` line stores no transaction, so a retry with the same `client_uuid` runs again (a repeated restock adds the stock twice). This is accepted for now because there is no offline mode (see `docs/note.md`).
+Command-only batches are not retry-safe: a batch with no `sale` line stores no transaction, so a retry with the same `client_uuid` runs again (a repeated restock adds the stock twice). This is accepted for now because there is no offline mode.
 
 Errors:
 
@@ -514,7 +514,7 @@ Screen "Semua barang terjual".
 - `items` are not paged. `share_pct` is `qty / total_qty * 100`, rounded half away from zero to one decimal (so the shares sum to about 100, not exactly).
 - `unsold` is the user's current products with no completed sale in the month, by name.
 - `q` filters both `items` and `unsold` by name: case-insensitive contains, with `%`, `_` and `\` matching literally. `total_qty`, `revenue` and `share_pct` stay whole-month figures whatever `q` is.
-- There is no low-stock flag in v1 ("hampir habis" is dropped, see `docs/note.md`).
+- There is no low-stock flag in v1 ("hampir habis" is dropped).
 
 ## Broadcasts
 
