@@ -5,6 +5,7 @@
 | Platform | Android only. Other platform folders stay but are not built or tested |
 | Architecture | Flutter's official MVVM guide: `provider` + `ChangeNotifier` view models, concrete repositories, `go_router` |
 | Data | The real API from the first commit, on a local `cargo run` backend (`http://10.0.2.2:3000` from the emulator). No fake repositories. Tests mock HTTP with `package:http/testing` `MockClient` |
+| Dev database | Local Postgres 18: database `pensil_warung_dev`, role `pensil_dev` (URL in `backend/.env`). The Aiven URL is kept commented out there. **Never run the backend or `migrate` against Aiven from app work.** (On 2026-11-28 the branch 01 agent migrated Aiven to V4 by mistake, so V4 is frozen there now) |
 | Backend faults | Log every failed request with its `x-request-id`. A backend fault goes into `docs/app_plan/backend_issues.md`, and the user is told. App branches never edit `backend/` |
 | Google sign-in | In v1, and it's **tested first** (branch 02, commit 1) so the user can sort out OAuth setup early. Client id comes from `pensil_warung/.env` |
 | Offline | No offline queue (the backend has no support). [30] `TanpaInternet` is built with only "Coba lagi" and new copy. [31] `CatatOffline` is dropped. Catat text stays in the box (in memory) when a save fails |
