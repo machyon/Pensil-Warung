@@ -1,3 +1,4 @@
+import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../core/format.dart';
@@ -42,8 +43,19 @@ class SavedCardView extends StatelessWidget {
               const SizedBox(height: 10),
               Text(tx.summary, style: appText(15, color: AppColors.label)),
               const SizedBox(height: 6),
-              // Transaction detail arrives with the history branch.
-              Text('Lihat atau ubah', style: appText(14, weight: FontWeight.w700, color: AppColors.faint)),
+              InkWell(
+                onTap: () {
+                  ScaffoldMessenger.of(context).hideCurrentSnackBar(); // its Urungkan would cover the next screen's buttons
+                  context.push('/transaksi/${tx.id}');
+                },
+                child: SizedBox(
+                  width: double.infinity,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: Text('Lihat atau ubah', style: appText(14, weight: FontWeight.w700)),
+                  ),
+                ),
+              ),
             ],
           ),
         ),

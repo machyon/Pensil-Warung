@@ -10,6 +10,7 @@ import '../ui/auth/register_screen.dart';
 import '../ui/landing/landing_screen.dart';
 import '../ui/catat/catat_screen.dart';
 import '../ui/histori/day_list_screen.dart';
+import '../ui/histori/detail_screen.dart';
 import '../ui/histori/histori_screen.dart';
 import '../ui/products/product_list_screen.dart';
 import '../ui/products/product_routes.dart';
@@ -77,6 +78,11 @@ GoRouter buildRouter(Session session, {String initialLocation = '/'}) {
       GoRoute(path: '/masuk', builder: (_, _) => const LoginScreen()),
       GoRoute(path: '/daftar', builder: (_, _) => const RegisterScreen()),
       GoRoute(path: '/hari/:date', parentNavigatorKey: rootKey, builder: (_, s) => DayListScreen(date: s.pathParameters['date']!)),
+      GoRoute(
+        path: '/transaksi/:id',
+        parentNavigatorKey: rootKey,
+        builder: (_, s) => DetailScreen(id: int.tryParse(s.pathParameters['id']!) ?? 0),
+      ),
       shell(
         _userTabs,
         ['Produk', 'Catat', 'Histori'],
