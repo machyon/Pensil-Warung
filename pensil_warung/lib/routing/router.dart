@@ -169,7 +169,7 @@ GoRouter buildRouter(Session session, {String initialLocation = '/'}) {
         screens: {0: const ProductListScreen(), 1: const CatatScreen(), 2: const HistoriScreen()},
         subRoutes: {0: productRoutes},
       ),
-      shell(_broadcasterTabs, ['Siaran', 'Tulis', 'Akun'], broadcasterNavItems, screens: {0: const SiaranScreen(), 1: const TulisScreen()},
+      shell(_broadcasterTabs, ['Siaran', 'Tulis', 'Akun'], broadcasterNavItems, screens: {0: const SiaranScreen(), 1: const TulisScreen(), 2: const SettingsScreen(tab: true)},
           subRoutes: {
             1: [GoRoute(path: 'kirim', parentNavigatorKey: rootKey, builder: (_, _) => const KirimScreen())],
           }),
