@@ -6,12 +6,15 @@ import '../core/widgets/app_header.dart';
 
 /// Pushed settings screen: back header, scrolling body, optional action bar at the bottom.
 class SettingsPage extends StatelessWidget {
-  const SettingsPage({super.key, required this.title, required this.children, this.bottom, this.titleSize = 26});
+  const SettingsPage({super.key, required this.title, required this.children, this.bottom, this.titleSize = 26, this.tab = false});
 
   final String title;
   final double titleSize;
   final List<Widget> children;
   final Widget? bottom;
+
+  /// A shell tab: a big title instead of the back header.
+  final bool tab;
 
   @override
   Widget build(BuildContext context) {
@@ -20,7 +23,16 @@ class SettingsPage extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            BackHeader(title: title, size: titleSize),
+            if (tab)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 12, 20, 8),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(title, style: appText(30, weight: FontWeight.w800, letterSpacing: -0.5)),
+                ),
+              )
+            else
+              BackHeader(title: title, size: titleSize),
             Expanded(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),

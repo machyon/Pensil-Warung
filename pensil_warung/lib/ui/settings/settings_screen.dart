@@ -15,7 +15,10 @@ import 'settings_widgets.dart';
 
 /// [10] Pengaturan. Opened from the avatar of any header.
 class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({super.key});
+  const SettingsScreen({super.key, this.tab = false});
+
+  /// The broadcaster's Akun tab: same rows, no back arrow.
+  final bool tab;
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -39,8 +42,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (user == null) return const SizedBox.shrink();
     final display = context.watch<DisplaySettings>();
     return SettingsPage(
-      title: 'Pengaturan',
+      title: widget.tab ? 'Akun' : 'Pengaturan',
       titleSize: 30,
+      tab: widget.tab,
       children: [
         Container(
           padding: const EdgeInsets.fromLTRB(24, 32, 24, 28),
@@ -65,6 +69,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
             Text(user.username, textAlign: TextAlign.center, style: appText(26, weight: FontWeight.w800, letterSpacing: -0.4)),
             const SizedBox(height: 4),
             Text(user.email, textAlign: TextAlign.center, style: appText(16, color: AppColors.muted)),
+            if (user.isBroadcaster) ...[
+              const SizedBox(height: 14),
+              Container(
+                padding: const EdgeInsets.fromLTRB(10, 5, 12, 5),
+                decoration: BoxDecoration(color: AppColors.chip, borderRadius: BorderRadius.circular(14)),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  const Icon(Icons.campaign_outlined, size: 16),
+                  const SizedBox(width: 6),
+                  Text('Penyiar', style: appText(13, weight: FontWeight.w800)),
+                ]),
+              ),
+            ],
           ]),
         ),
         SettingsSection(title: 'Akun', children: [
@@ -113,7 +129,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           border: true,
           onTap: () => _confirmSignOut(context),
         ),
-        _Tile(height: 48, label: 'Hapus akun', icon: Icons.delete_outline_rounded, onTap: () => context.push('/pengaturan/hapus')),
+        if (!user.isBroadcaster)
+          _Tile(height: 48, label: 'Hapus akun', icon: Icons.delete_outline_rounded, onTap: () => context.push('/pengaturan/hapus')),
       ],
     );
   }

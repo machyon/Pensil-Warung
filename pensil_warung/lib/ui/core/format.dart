@@ -99,3 +99,15 @@ String monthShort(String ym) => monthNames[int.parse(ym.substring(5, 7)) - 1].su
 
 /// Days in `2026-10`.
 int daysInMonth(String ym) => DateTime.utc(int.parse(ym.substring(0, 4)), int.parse(ym.substring(5, 7)) + 1, 0).day;
+
+/// How long until [t]: `6j 12m lagi`, `2 hari lagi`; [long] gives `6 jam 12 menit lagi`. [now] is for tests.
+String untilText(DateTime t, {DateTime? now, bool long = false}) {
+  final mins = t.difference(now ?? DateTime.now()).inMinutes.clamp(1, 1 << 30);
+  final h = mins ~/ 60, m = mins % 60;
+  if (h >= 24) return '${h ~/ 24} hari lagi';
+  final parts = [
+    if (h > 0) long ? '$h jam' : '${h}j',
+    if (m > 0) long ? '$m menit' : '${m}m',
+  ];
+  return '${parts.join(' ')} lagi';
+}
