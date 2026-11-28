@@ -18,6 +18,7 @@ import '../photos/photo_flow.dart';
 import '../../catat/parser.dart';
 import '../../catat/result.dart';
 import 'catat_view_model.dart';
+import 'offline_screen.dart';
 import 'saved_card.dart';
 
 class CatatScreen extends StatefulWidget {
@@ -45,15 +46,22 @@ class _CatatScreenState extends State<CatatScreen> {
         !await showConfirmSheet(context, vm.summary, lineCount: vm.lint.lines.length)) {
       return;
     }
-    final out = await vm.save();
+    var out = await vm.save();
     if (!mounted) return;
+    if (out == SaveOutcome.offline) {
+      // Same text, so Coba lagi reuses the same client_uuid.
+      out = await Navigator.of(context).push<SaveOutcome>(
+              MaterialPageRoute(builder: (_) => OfflineScreen(retry: vm.save))) ??
+          SaveOutcome.offline;
+      if (!mounted) return;
+    }
     switch (out) {
       case SaveOutcome.saved:
         _afterSave(messenger, vm);
       case SaveOutcome.linesInvalid:
         messenger.showSnackBar(const SnackBar(content: Text('Ada baris yang perlu dibetulkan.')));
       case SaveOutcome.offline:
-        messenger.showSnackBar(const SnackBar(content: Text('Tidak ada internet.')));
+        break; // the user backed out of the offline screen; the text stays
       case SaveOutcome.failed:
         if (vm.error != null) messenger.showSnackBar(SnackBar(content: Text(vm.error!)));
     }
