@@ -1,5 +1,8 @@
+import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:provider/provider.dart';
 
+import '../../../data/session.dart';
 import '../theme.dart';
 
 /// Big title, optional subtitle, bell (unread dot) and avatar letter.
@@ -8,18 +11,17 @@ class AppHeader extends StatelessWidget {
     super.key,
     required this.title,
     this.subtitle,
-    this.avatarLetter,
+    this.avatar = false,
     this.hasUnread = false,
     this.onBell,
-    this.onAvatar,
   });
 
   final String title;
   final String? subtitle;
-  final String? avatarLetter;
+  /// Show the avatar letter, which opens Pengaturan.
+  final bool avatar;
   final bool hasUnread;
   final VoidCallback? onBell;
-  final VoidCallback? onAvatar;
 
   @override
   Widget build(BuildContext context) {
@@ -69,32 +71,33 @@ class AppHeader extends StatelessWidget {
                 ],
               ),
             ),
-          if (avatarLetter != null)
-            Semantics(
-              button: true,
-              label: 'Pengaturan',
-              child: GestureDetector(
-                onTap: onAvatar,
-                child: Container(
-                  width: 44,
-                  height: 44,
-                  alignment: Alignment.center,
-                  decoration: const BoxDecoration(
-                    color: AppColors.avatar,
-                    shape: BoxShape.circle,
-                  ),
-                  child: Text(
-                    avatarLetter!.toUpperCase(),
-                    style: appText(
-                      16,
-                      weight: FontWeight.w800,
-                      color: AppColors.surface,
-                    ),
-                  ),
-                ),
-              ),
-            ),
+          if (avatar) const AvatarButton(),
         ],
+      ),
+    );
+  }
+}
+
+/// Avatar letter of the signed-in user; opens Pengaturan.
+class AvatarButton extends StatelessWidget {
+  const AvatarButton({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final name = context.select<Session, String>((s) => s.user?.username ?? '');
+    return Semantics(
+      button: true,
+      label: 'Pengaturan',
+      child: GestureDetector(
+        onTap: () => context.push('/pengaturan'),
+        child: Container(
+          width: 44,
+          height: 44,
+          alignment: Alignment.center,
+          decoration: const BoxDecoration(color: AppColors.avatar, shape: BoxShape.circle),
+          child: Text(name.isEmpty ? '?' : name[0].toUpperCase(),
+              style: appText(16, weight: FontWeight.w800, color: AppColors.surface)),
+        ),
       ),
     );
   }
@@ -102,9 +105,10 @@ class AppHeader extends StatelessWidget {
 
 /// Back arrow + title for pushed screens.
 class BackHeader extends StatelessWidget {
-  const BackHeader({super.key, required this.title, this.onBack, this.trailing});
+  const BackHeader({super.key, required this.title, this.onBack, this.trailing, this.size = 20});
 
   final String title;
+  final double size;
   final Widget? trailing;
   final VoidCallback? onBack;
 
@@ -120,7 +124,7 @@ class BackHeader extends StatelessWidget {
             icon: const Icon(Icons.arrow_back_rounded),
           ),
           Expanded(
-            child: Text(title, style: appText(20, weight: FontWeight.w800)),
+            child: Text(title, style: appText(size, weight: FontWeight.w800)),
           ),
           ?trailing,
         ],

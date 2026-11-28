@@ -5,7 +5,6 @@ import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 
 import '../../data/repositories/product_repository.dart';
-import '../../data/session.dart';
 import '../core/format.dart';
 import '../core/theme.dart';
 import '../core/widgets/app_header.dart';
@@ -106,11 +105,10 @@ class _CatatScreenState extends State<CatatScreen> {
   @override
   Widget build(BuildContext context) {
     final vm = context.watch<CatatViewModel>();
-    final name = context.select<Session, String>((s) => s.user?.displayName ?? '?');
     return SafeArea(
       child: Column(
         children: [
-          AppHeader(title: 'Catat', subtitle: wibDateShort(DateTime.now()), avatarLetter: name.isEmpty ? '?' : name[0], hasUnread: context.select<NotificationFeed, bool>((f) => f.hasUnread), onBell: () => context.push('/notifikasi')),
+          AppHeader(title: 'Catat', subtitle: wibDateShort(DateTime.now()), avatar: true, hasUnread: context.select<NotificationFeed, bool>((f) => f.hasUnread), onBell: () => context.push('/notifikasi')),
           Expanded(
             child: ListView(
               controller: null,

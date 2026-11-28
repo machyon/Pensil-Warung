@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:pensil_warung/data/prefs.dart';
+import 'package:pensil_warung/data/session.dart';
 import 'package:pensil_warung/ui/core/format.dart';
 import 'package:pensil_warung/ui/notifications/notifikasi_screen.dart';
 import 'package:pensil_warung/ui/notifications/notification_feed.dart';
@@ -13,7 +14,10 @@ Map<String, Object?> _b(int id, String category, String title, {bool body = fals
     {'id': id, 'category': category, 'title': title, 'summary': 'Ringkasan $id', 'has_body': body, 'shown_at': at};
 
 Future<void> _pump(WidgetTester tester, NotificationFeed feed) async {
-  await tester.pumpWidget(ChangeNotifierProvider.value(value: feed, child: const MaterialApp(home: NotifikasiScreen())));
+  await tester.pumpWidget(MultiProvider(
+    providers: [ChangeNotifierProvider.value(value: feed), ChangeNotifierProvider(create: (_) => Session())],
+    child: const MaterialApp(home: NotifikasiScreen()),
+  ));
   await tester.pumpAndSettle();
 }
 

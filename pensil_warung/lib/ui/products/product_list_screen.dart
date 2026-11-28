@@ -153,7 +153,7 @@ class _BodyState extends State<_Body> {
         children: [
           Column(
             children: [
-              AppHeader(title: 'Produk', hasUnread: context.select<NotificationFeed, bool>((f) => f.hasUnread), onBell: () => context.push('/notifikasi')),
+              AppHeader(title: 'Produk', avatar: true, hasUnread: context.select<NotificationFeed, bool>((f) => f.hasUnread), onBell: () => context.push('/notifikasi')),
               if (vm.loaded && (vm.total > 0))
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),

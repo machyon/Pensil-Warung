@@ -172,6 +172,7 @@ void main() {
         Provider(create: (_) => AnalyticsRepository(api)),
         ChangeNotifierProvider.value(value: txRepo),
         ChangeNotifierProvider.value(value: feed),
+        ChangeNotifierProvider(create: (_) => Session()),
       ],
       child: const MaterialApp(home: Scaffold(body: HistoriScreen())),
     ));
