@@ -118,7 +118,7 @@ class _BodyState extends State<_Body> {
                         ),
                         child: Row(
                           children: [
-                            ProductAvatar(name: shown[i].name, photoUrl: shown[i].photoUrl, size: 56),
+                            ProductAvatar(name: shown[i].name, photoUrl: shown[i].photoUrl, size: 56, onPhotoError: () => context.read<ProductRepository>().photoFailed(shown[i].id)),
                             const SizedBox(width: 14),
                             Expanded(
                               child: Column(
