@@ -9,6 +9,7 @@ class Broadcast {
     required this.shownAt,
     this.body,
     this.status,
+    this.createdAt,
     this.createdByName,
     this.cancelledAt,
     this.cancelledByName,
@@ -23,6 +24,7 @@ class Broadcast {
         shownAt: DateTime.parse(j['shown_at'] as String),
         body: j['body'] as String?,
         status: j['effective_status'] as String?,
+        createdAt: j['created_at'] == null ? null : DateTime.parse(j['created_at'] as String),
         createdByName: j['created_by_name'] as String?,
         cancelledAt: j['cancelled_at'] == null ? null : DateTime.parse(j['cancelled_at'] as String),
         cancelledByName: j['cancelled_by_name'] as String?,
@@ -38,6 +40,7 @@ class Broadcast {
 
   /// Broadcaster detail only: `scheduled`, `sent` or `cancelled`.
   final String? status;
+  final DateTime? createdAt;
   final String? createdByName;
   final DateTime? cancelledAt;
   final String? cancelledByName;

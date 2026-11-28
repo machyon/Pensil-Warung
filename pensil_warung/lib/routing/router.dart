@@ -7,6 +7,7 @@ import '../domain/user.dart';
 import '../ui/core/widgets/main_nav.dart';
 import '../ui/core/widgets/placeholder_tab.dart';
 import '../ui/auth/login_screen.dart';
+import '../ui/broadcaster/broadcast_detail_screen.dart';
 import '../ui/broadcaster/kirim_screen.dart';
 import '../ui/broadcaster/siaran_screen.dart';
 import '../ui/broadcaster/tulis_screen.dart';
@@ -155,6 +156,11 @@ GoRouter buildRouter(Session session, {String initialLocation = '/'}) {
             builder: (_, s) => EditScreen(tx: s.extra! as Transaction),
           ),
         ],
+      ),
+      GoRoute(
+        path: '/siaran/:id',
+        parentNavigatorKey: rootKey,
+        builder: (_, s) => BroadcastDetailScreen(id: int.tryParse(s.pathParameters['id']!) ?? 0),
       ),
       shell(
         _userTabs,

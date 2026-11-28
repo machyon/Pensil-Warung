@@ -112,6 +112,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         ChangeNotifierProvider.value(value: _siaran),
         ChangeNotifierProvider.value(value: _draft),
         ChangeNotifierProvider.value(value: _display),
+        Provider(create: (_) => BroadcasterRepository(widget.api)),
         Provider(create: (_) => CatatRepository(widget.api, _products)),
       ],
       child: MaterialApp.router(
