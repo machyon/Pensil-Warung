@@ -31,35 +31,44 @@ class AppHeader extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title, style: appText(30, weight: FontWeight.w800, letterSpacing: -0.5)),
-                if (subtitle != null) Text(subtitle!, style: appText(14, color: AppColors.muted)),
+                Text(
+                  title,
+                  style: appText(
+                    30,
+                    weight: FontWeight.w800,
+                    letterSpacing: -0.5,
+                  ),
+                ),
+                if (subtitle != null)
+                  Text(subtitle!, style: appText(14, color: AppColors.muted)),
               ],
             ),
           ),
-          IconButton(
-            tooltip: 'Notifikasi',
-            onPressed: onBell,
-            icon: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                const Icon(Icons.notifications_none_rounded, size: 28),
-                if (hasUnread)
-                  Positioned(
-                    right: 0,
-                    top: 0,
-                    child: Container(
-                      width: 10,
-                      height: 10,
-                      decoration: BoxDecoration(
-                        color: AppColors.error,
-                        shape: BoxShape.circle,
-                        border: Border.all(color: AppColors.paper, width: 2),
+          if (onBell != null)
+            IconButton(
+              tooltip: 'Notifikasi',
+              onPressed: onBell,
+              icon: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  const Icon(Icons.notifications_none_rounded, size: 28),
+                  if (hasUnread)
+                    Positioned(
+                      right: 0,
+                      top: 0,
+                      child: Container(
+                        width: 10,
+                        height: 10,
+                        decoration: BoxDecoration(
+                          color: AppColors.error,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: AppColors.paper, width: 2),
+                        ),
                       ),
                     ),
-                  ),
-              ],
+                ],
+              ),
             ),
-          ),
           if (avatarLetter != null)
             Semantics(
               button: true,
@@ -70,9 +79,18 @@ class AppHeader extends StatelessWidget {
                   width: 44,
                   height: 44,
                   alignment: Alignment.center,
-                  decoration: const BoxDecoration(color: AppColors.avatar, shape: BoxShape.circle),
-                  child: Text(avatarLetter!.toUpperCase(),
-                      style: appText(16, weight: FontWeight.w800, color: AppColors.surface)),
+                  decoration: const BoxDecoration(
+                    color: AppColors.avatar,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Text(
+                    avatarLetter!.toUpperCase(),
+                    style: appText(
+                      16,
+                      weight: FontWeight.w800,
+                      color: AppColors.surface,
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -100,7 +118,9 @@ class BackHeader extends StatelessWidget {
             onPressed: onBack ?? () => Navigator.maybePop(context),
             icon: const Icon(Icons.arrow_back_rounded),
           ),
-          Expanded(child: Text(title, style: appText(20, weight: FontWeight.w800))),
+          Expanded(
+            child: Text(title, style: appText(20, weight: FontWeight.w800)),
+          ),
         ],
       ),
     );

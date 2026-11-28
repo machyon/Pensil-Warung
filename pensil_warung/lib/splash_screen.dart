@@ -1,14 +1,10 @@
-import 'dart:async';
-
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-/// Splash "00c" from the Design canvas. Shows for 3 seconds, then calls [onDone].
+/// Splash "00c" from the Design canvas. Pure look; `SplashGate` decides when to leave.
 class SplashScreen extends StatefulWidget {
-  const SplashScreen({super.key, required this.onDone});
-
-  final VoidCallback onDone;
+  const SplashScreen({super.key});
 
   @override
   State<SplashScreen> createState() => _SplashScreenState();
@@ -30,17 +26,8 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
     duration: const Duration(milliseconds: 1200),
   )..repeat();
 
-  Timer? _timer;
-
-  @override
-  void initState() {
-    super.initState();
-    _timer = Timer(const Duration(seconds: 3), widget.onDone);
-  }
-
   @override
   void dispose() {
-    _timer?.cancel();
     _intro.dispose();
     _dots.dispose();
     super.dispose();
