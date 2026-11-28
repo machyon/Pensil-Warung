@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import 'config.dart';
 import 'data/api_client.dart';
+import 'data/repositories/auth_repository.dart';
 import 'data/session.dart';
 import 'routing/router.dart';
 import 'ui/core/theme.dart';
@@ -40,6 +41,7 @@ class _MyAppState extends State<MyApp> {
       providers: [
         ChangeNotifierProvider.value(value: widget.session),
         Provider.value(value: widget.api),
+        Provider(create: (_) => AuthRepository(widget.api)),
       ],
       child: MaterialApp.router(
         title: 'Pensil Warung',

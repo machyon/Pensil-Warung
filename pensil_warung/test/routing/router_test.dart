@@ -1,5 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:provider/provider.dart';
+import 'package:pensil_warung/data/api_client.dart';
+import 'package:pensil_warung/data/repositories/auth_repository.dart';
 import 'package:pensil_warung/data/session.dart';
 import 'package:pensil_warung/domain/user.dart';
 import 'package:pensil_warung/routing/router.dart';
@@ -52,10 +55,17 @@ void main() {
   });
 
   testWidgets('without a session a tab path shows Landing', (tester) async {
-    final router = buildRouter(Session(), initialLocation: '/catat');
-    await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+    final session = Session();
+    final router = buildRouter(session, initialLocation: '/catat');
+    await tester.pumpWidget(MultiProvider(
+      providers: [
+        ChangeNotifierProvider.value(value: session),
+        Provider(create: (_) => AuthRepository(ApiClient(baseUrl: 'http://x'))),
+      ],
+      child: MaterialApp.router(routerConfig: router),
+    ));
     await tester.pumpAndSettle();
-    expect(find.text('Landing'), findsOneWidget);
+    expect(find.text('Mulai sekarang'), findsOneWidget);
     expect(find.byType(MainNav), findsNothing);
   });
 }
