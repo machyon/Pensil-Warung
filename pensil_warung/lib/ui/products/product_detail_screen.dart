@@ -9,6 +9,7 @@ import '../core/theme.dart';
 import '../core/widgets/app_header.dart';
 import '../core/widgets/error_view.dart';
 import '../core/widgets/product_avatar.dart';
+import 'product_actions.dart';
 import 'product_detail_view_model.dart';
 
 class ProductDetailScreen extends StatelessWidget {
@@ -120,6 +121,42 @@ class _BodyState extends State<_Body> {
                       ],
                     ),
             ),
+            if (p != null)
+              Container(
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+                decoration: const BoxDecoration(
+                  color: AppColors.surface,
+                  border: Border(top: BorderSide(color: AppColors.border)),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      flex: 10,
+                      child: _BarButton(
+                        label: 'Hapus',
+                        fg: const Color(0xFFB3261E),
+                        bg: AppColors.surface,
+                        bordered: true,
+                        onTap: () => confirmDeleteProduct(context, p, sold: vm.sold),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      flex: 13,
+                      child: _BarButton(
+                        label: 'Ubah',
+                        fg: AppColors.onAccent,
+                        bg: AppColors.accent,
+                        icon: Icons.edit_outlined,
+                        onTap: () async {
+                          await context.push('/produk/${p.id}/ubah', extra: p);
+                          if (context.mounted) vm.load();
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
           ],
         ),
       ),
@@ -196,6 +233,46 @@ class _MovementRow extends StatelessWidget {
             ),
             Text(m.delta > 0 ? '+${m.delta}' : '−${m.delta.abs()}', style: appText(15, weight: FontWeight.w700)),
           ],
+        ),
+      );
+}
+
+class _BarButton extends StatelessWidget {
+  const _BarButton({
+    required this.label,
+    required this.fg,
+    required this.bg,
+    required this.onTap,
+    this.bordered = false,
+    this.icon,
+  });
+
+  final String label;
+  final Color fg, bg;
+  final bool bordered;
+  final IconData? icon;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+        height: 56,
+        child: Material(
+          color: bg,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+            side: bordered ? const BorderSide(color: AppColors.border) : BorderSide.none,
+          ),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(18),
+            onTap: onTap,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                if (icon != null) ...[Icon(icon, color: fg, size: 20), const SizedBox(width: 8)],
+                Text(label, style: appText(16, weight: FontWeight.w700, color: fg)),
+              ],
+            ),
+          ),
         ),
       );
 }
