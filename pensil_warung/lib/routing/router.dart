@@ -6,6 +6,7 @@ import '../domain/user.dart';
 import '../ui/core/widgets/main_nav.dart';
 import '../ui/core/widgets/placeholder_tab.dart';
 import '../ui/auth/login_screen.dart';
+import '../ui/auth/register_screen.dart';
 import '../ui/landing/landing_screen.dart';
 import '../ui/splash/splash_gate.dart';
 
@@ -57,6 +58,7 @@ GoRouter buildRouter(Session session, {String initialLocation = '/'}) {
       GoRoute(path: '/', builder: (_, _) => const SplashGate()),
       GoRoute(path: '/welcome', builder: (_, _) => const LandingScreen()),
       GoRoute(path: '/masuk', builder: (_, _) => const LoginScreen()),
+      GoRoute(path: '/daftar', builder: (_, _) => const RegisterScreen()),
       shell(_userTabs, ['Produk', 'Catat', 'Histori'], userNavItems),
       shell(_broadcasterTabs, ['Siaran', 'Tulis', 'Akun'], broadcasterNavItems),
     ],
