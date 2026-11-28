@@ -26,7 +26,19 @@ import 'ui/settings/google_reauth.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  checkConfig();
+  try {
+    checkConfig();
+  } on StateError catch (e) {
+    // Throwing before runApp leaves the OS launch splash (app icon) up forever.
+    runApp(MaterialApp(
+      home: Scaffold(
+        body: Center(
+          child: Padding(padding: const EdgeInsets.all(24), child: Text(e.message, textAlign: TextAlign.center)),
+        ),
+      ),
+    ));
+    return;
+  }
   final prefs = Prefs(await SharedPreferences.getInstance());
   final session = Session();
   final api = ApiClient(token: () => session.token, onUnauthorized: session.signOut);
