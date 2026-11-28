@@ -31,6 +31,7 @@ class CatatViewModel extends ChangeNotifier {
       {
     controller.addListener(_onText);
     _products.addListener(_relint);
+    _tx.addListener(_refreshSaved);
     _relint();
   }
 
@@ -180,6 +181,22 @@ class CatatViewModel extends ChangeNotifier {
     } catch (_) {}
   }
 
+  /// A void or revise done elsewhere (Detail) changed the sale the card shows: follow it.
+  Future<void> _refreshSaved() async {
+    final s = saved;
+    if (s == null || running) return; // a save of our own also calls markChanged
+    try {
+      var t = await _tx.get(s.tx.id);
+      while (t.replacedById != null) {
+        t = await _tx.get(t.replacedById!);
+      }
+      if (saved?.tx.id != s.tx.id) return; // _loadToday may have swapped the card meanwhile
+      saved = t.voided ? null : SavedCard(tx: SavedTransaction.fromTransaction(t), rawText: s.rawText, undoable: s.undoable);
+      notifyListeners();
+      if (saved != null) _loadToday();
+    } catch (_) {} // keep the card as it is
+  }
+
   /// Voids the saved sale and puts its text back in the box. Returns an error message, or null.
   Future<String?> undo() async {
     final s = saved;
@@ -208,6 +225,7 @@ class CatatViewModel extends ChangeNotifier {
   void dispose() {
     _timer?.cancel();
     _products.removeListener(_relint);
+    _tx.removeListener(_refreshSaved);
     controller.dispose();
     scroll.dispose();
     super.dispose();

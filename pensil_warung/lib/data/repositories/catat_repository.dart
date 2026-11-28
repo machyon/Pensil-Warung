@@ -1,5 +1,6 @@
 import '../../catat/parser.dart';
 import '../../domain/product.dart';
+import '../../domain/transaction.dart';
 import '../api_client.dart';
 import 'product_repository.dart';
 
@@ -20,6 +21,13 @@ class SavedTransaction {
           for (final i in j['items'] as List)
             SavedItem((i as Map<String, dynamic>)['product_name'] as String, i['quantity'] as int),
         ];
+
+  /// A later version of this sale, from `GET /transactions/{id}`.
+  SavedTransaction.fromTransaction(Transaction t)
+      : id = t.id,
+        total = t.total,
+        occurredAt = t.occurredAt,
+        items = [for (final i in t.items) SavedItem(i.name, i.quantity)];
 
   final int id, total;
   final DateTime occurredAt;
