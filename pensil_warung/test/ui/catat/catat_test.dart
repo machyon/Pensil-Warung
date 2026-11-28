@@ -27,6 +27,7 @@ void main() {
   late http.Response Function(http.Request) reply;
   late ProductRepository products;
   late CatatViewModel vm;
+  late TransactionRepository txRepo;
 
   setUp(() {
     sent = [];
@@ -38,7 +39,8 @@ void main() {
     products = ProductRepository(api)
       ..items = const [Product(id: 5, name: 'Nasi goreng', price: 15000, stock: 10)]
       ..loaded = true;
-    vm = CatatViewModel(CatatRepository(api, products), products, TransactionRepository(api, products));
+    txRepo = TransactionRepository(api, products);
+    vm = CatatViewModel(CatatRepository(api, products), products, txRepo);
   });
 
   tearDown(() => vm.dispose());
@@ -51,6 +53,29 @@ void main() {
     expect(vm.summary.needsConfirm, isFalse);
     vm.setText('nasi goreng 2\nbuat produk kerupuk harga 2000 stok 30');
     expect(vm.summary.needsConfirm, isTrue);
+  });
+
+  test('the saved card follows a void or revise done from Detail', () async {
+    Map<String, Object?> get(Map<String, Object?> over) => {..._tx, ...over};
+    reply = (r) {
+      if (r.url.path == '/api/v1/catat') return _json(201, {'transaction': _tx, 'products_changed': [], 'products_deleted': []});
+      if (r.url.path == '/api/v1/transactions/12') return _json(200, get({'status': 'voided', 'replaced_by_id': 13}));
+      if (r.url.path == '/api/v1/transactions/13') return _json(200, get({'id': 13, 'total': 15000, 'items': [{'id': 31, 'line_no': 1, 'product_id': 5, 'product_name': 'Nasi goreng', 'unit_price': 15000, 'quantity': 1, 'line_total': 15000}]}));
+      return _json(200, {'day': {'date': '2026-11-26', 'transaction_count': 1, 'revenue': 15000}, 'items': []});
+    };
+    vm.setText('nasi goreng 2');
+    await vm.save();
+    expect(vm.saved!.tx.total, 30000);
+
+    txRepo.markChanged(); // Detail revised it: 12 is replaced by 13
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(vm.saved!.tx.id, 13);
+    expect(vm.saved!.tx.summary, 'Nasi goreng 1');
+
+    reply = (r) => r.url.path == '/api/v1/transactions/13' ? _json(200, get({'id': 13, 'status': 'voided'})) : _json(200, {});
+    txRepo.markChanged(); // Detail voided it
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(vm.saved, isNull);
   });
 
   test('save sends ops, applies products_changed and shows the card with Urungkan', () async {

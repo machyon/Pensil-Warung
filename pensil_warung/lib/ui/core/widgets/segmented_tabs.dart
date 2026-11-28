@@ -13,7 +13,7 @@ class SegmentedTabs extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(color: AppColors.chip, borderRadius: BorderRadius.circular(16)),
+      decoration: BoxDecoration(color: AppColors.disabled, borderRadius: BorderRadius.circular(22)),
       child: Row(
         children: [
           for (var i = 0; i < labels.length; i++)
@@ -25,16 +25,17 @@ class SegmentedTabs extends StatelessWidget {
                   behavior: HitTestBehavior.opaque,
                   onTap: () => onChanged(i),
                   child: Container(
-                    height: 44,
+                    height: 40,
                     alignment: Alignment.center,
                     decoration: BoxDecoration(
                       color: i == selected ? AppColors.surface : null,
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(18),
+                      boxShadow: i == selected ? const [BoxShadow(color: Color(0x1F000000), blurRadius: 3, offset: Offset(0, 1))] : null,
                     ),
                     child: Text(
                       labels[i],
-                      style: appText(14, weight: i == selected ? FontWeight.w800 : FontWeight.w600,
-                          color: i == selected ? AppColors.ink : AppColors.muted),
+                      style: appText(15, weight: i == selected ? FontWeight.w700 : FontWeight.w600,
+                          color: i == selected ? AppColors.ink : AppColors.label),
                     ),
                   ),
                 ),
