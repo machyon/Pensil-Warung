@@ -11,6 +11,16 @@ import 'day_tile.dart';
 import 'histori_view_model.dart';
 
 const _firstDays = 7;
+const fullReportDays = 14; // weekday chart
+const topItemsDays = 7;
+
+/// Which sections have enough data, from the days with sales ([days]) and the API's own nulls.
+({bool weekday, bool top, bool comparison}) analitikGates(MonthSummary s, int days) => (
+      weekday: days >= fullReportDays && s.weekdayAvg != null,
+      top: days >= topItemsDays && s.topItems.isNotEmpty,
+      comparison: s.previous.changePct != null,
+    );
+
 
 /// "▲ 8% dari 1–17 Okt · 641 transaksi"; null change_pct hides the arrow part.
 String comparisonLine(MonthSummary s) {
@@ -69,6 +79,7 @@ class AnalitikView extends StatelessWidget {
   Widget build(BuildContext context) {
     final s = vm.summary;
     if (s == null) return const Center(child: CircularProgressIndicator());
+    final g = analitikGates(s, vm.days.length);
     final shown = vm.showAll ? vm.days : vm.days.take(_firstDays).toList();
     return RefreshIndicator(
       onRefresh: vm.load,
@@ -81,14 +92,16 @@ class AnalitikView extends StatelessWidget {
           _SummaryCard(vm: vm, s: s),
           const SizedBox(height: 12),
           _TrendCard(vm: vm, s: s),
-          if (s.weekdayAvg != null) ...[
+          if (vm.days.length < fullReportDays) ...[const SizedBox(height: 12), _ProgressCard(days: vm.days.length)],
+          if (g.weekday) ...[
             const SizedBox(height: 12),
             _WeekdayCard(s: s, avg: s.weekdayAvg!),
           ],
-          if (s.topItems.isNotEmpty) ...[
+          if (g.top) ...[
             const SizedBox(height: 12),
             _TopItemsCard(s: s),
           ],
+          if (!g.weekday || !g.top || !g.comparison) ...[const SizedBox(height: 12), _LaterCard(s: s, g: g)],
           const SizedBox(height: 16),
           Text('Per hari', style: appText(18, weight: FontWeight.w800)),
           const SizedBox(height: 8),
@@ -411,6 +424,62 @@ class _TopItemsCard extends StatelessWidget {
             ),
         ],
       ),
+    );
+  }
+}
+
+/// [34] "Laporan lengkap sedang disiapkan".
+class _ProgressCard extends StatelessWidget {
+  const _ProgressCard({required this.days});
+  final int days;
+
+  @override
+  Widget build(BuildContext context) {
+    return AppCard(
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('Laporan lengkap sedang disiapkan', style: appText(16, weight: FontWeight.w800)),
+        const SizedBox(height: 4),
+        Text('Catat jualan beberapa hari lagi, lalu analisisnya muncul di sini.', style: appText(14, color: AppColors.muted)),
+        const SizedBox(height: 12),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(6),
+          child: LinearProgressIndicator(value: days / fullReportDays, minHeight: 10, backgroundColor: AppColors.chip, color: AppColors.accent),
+        ),
+        const SizedBox(height: 8),
+        Text('$days dari $fullReportDays hari · ${fullReportDays - days} hari lagi', style: appText(13, weight: FontWeight.w700, color: AppColors.label)),
+      ]),
+    );
+  }
+}
+
+/// "Akan muncul nanti": the sections whose gate has not passed.
+class _LaterCard extends StatelessWidget {
+  const _LaterCard({required this.s, required this.g});
+  final MonthSummary s;
+  final ({bool weekday, bool top, bool comparison}) g;
+
+  @override
+  Widget build(BuildContext context) {
+    final next = monthNames[int.parse(s.month.substring(5, 7)) % 12];
+    final rows = [
+      if (!g.weekday) ('Hari paling ramai', 'Setelah $fullReportDays hari'),
+      if (!g.comparison) ('Dibanding bulan lalu', 'Mulai $next'),
+      if (!g.top) ('Barang terlaris', 'Setelah $topItemsDays hari'),
+    ];
+    return AppCard(
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('Akan muncul nanti', style: appText(14, weight: FontWeight.w700, color: AppColors.muted)),
+        for (final r in rows)
+          Padding(
+            padding: const EdgeInsets.only(top: 10),
+            child: Row(children: [
+              const Icon(Icons.lock_outline, size: 18, color: AppColors.faint),
+              const SizedBox(width: 10),
+              Expanded(child: Text(r.$1, style: appText(15, weight: FontWeight.w700))),
+              Text(r.$2, style: appText(13, color: AppColors.muted)),
+            ]),
+          ),
+      ]),
     );
   }
 }
