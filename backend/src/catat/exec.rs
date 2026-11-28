@@ -5,6 +5,7 @@ use std::collections::{BTreeSet, HashMap};
 
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
+use time::OffsetDateTime;
 use tokio_postgres::GenericClient;
 use uuid::Uuid;
 
@@ -16,7 +17,8 @@ use crate::products::{self, NewProduct};
 use crate::transactions::dto::TransactionResponse;
 use crate::transactions::{TRANSACTION_COLUMNS, with_items};
 
-/// Inserts the transaction row. `None` means the user already has one with this
+/// Inserts the transaction row (`occurred_at` defaults to now; `replaces_id`
+/// links a revision to the row it replaces). `None` means the user already has one with this
 /// `client_uuid` (a concurrent duplicate won): the caller replays it.
 pub async fn insert_transaction(
     client: &impl GenericClient,
@@ -24,14 +26,23 @@ pub async fn insert_transaction(
     client_uuid: Uuid,
     raw_text: &str,
     total: i64,
+    occurred_at: Option<OffsetDateTime>,
+    replaces_id: Option<i64>,
 ) -> AppResult<Option<i64>> {
     let row = client
         .query_opt(
-            "INSERT INTO transactions (user_id, client_uuid, raw_text, total)
-             VALUES ($1, $2, $3, $4)
+            "INSERT INTO transactions (user_id, client_uuid, raw_text, total, occurred_at, replaces_id)
+             VALUES ($1, $2, $3, $4, COALESCE($5, now()), $6)
              ON CONFLICT ON CONSTRAINT transactions_client_uuid_key DO NOTHING
              RETURNING id",
-            &[&user_id, &client_uuid, &raw_text, &total],
+            &[
+                &user_id,
+                &client_uuid,
+                &raw_text,
+                &total,
+                &occurred_at,
+                &replaces_id,
+            ],
         )
         .await?;
     Ok(row.map(|r| r.get(0)))
@@ -80,6 +91,38 @@ pub async fn insert_item(
     Ok(())
 }
 
+/// Inserts one item with the given snapshot (a revision keeps old names and
+/// prices; `product_id` is `None` for a deleted product). The trigger records
+/// the `sale` movement when there is a product.
+pub async fn insert_snapshot_item(
+    client: &impl GenericClient,
+    transaction_id: i64,
+    line_no: i16,
+    product_id: Option<i64>,
+    product_name: &str,
+    unit_price: i64,
+    quantity: Decimal,
+) -> AppResult<()> {
+    let total = line_total(quantity, unit_price).ok_or_else(AppError::internal)?;
+    client
+        .execute(
+            "INSERT INTO transaction_items
+               (transaction_id, product_id, line_no, product_name, unit_price, quantity, line_total)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)",
+            &[
+                &transaction_id,
+                &product_id,
+                &line_no,
+                &product_name,
+                &unit_price,
+                &quantity,
+                &total,
+            ],
+        )
+        .await?;
+    Ok(())
+}
+
 /// The user's transaction with this `client_uuid`, with its items, if any.
 pub async fn find_by_client_uuid(
     client: &impl GenericClient,
@@ -95,7 +138,7 @@ pub async fn find_by_client_uuid(
     else {
         return Ok(None);
     };
-    Ok(Some(with_items(client, &row).await?))
+    Ok(Some(with_items(client, user_id, &row).await?))
 }
 
 /// The user's products among `ids` with their current stock, ordered by id.
@@ -107,7 +150,7 @@ pub async fn product_stocks(
 ) -> AppResult<Vec<ProductStock>> {
     let rows = client
         .query(
-            "SELECT id, name, stock FROM products
+            "SELECT id, name, price, stock FROM products
              WHERE user_id = $1 AND id = ANY($2) ORDER BY id",
             &[&user_id, &ids],
         )
@@ -117,6 +160,7 @@ pub async fn product_stocks(
         .map(|r| ProductStock {
             id: r.get("id"),
             name: r.get("name"),
+            price: r.get("price"),
             stock: r.get::<_, Decimal>("stock").to_i64().unwrap_or_default(),
         })
         .collect())
@@ -134,8 +178,16 @@ pub async fn execute(
 ) -> AppResult<Option<(CatatResponse, Vec<String>)>> {
     let has_sale = plan.steps.iter().any(|s| matches!(s, Step::Sale { .. }));
     let transaction_id = if has_sale {
-        match insert_transaction(tx, user_id, batch.client_uuid, &batch.raw_text, plan.total)
-            .await?
+        match insert_transaction(
+            tx,
+            user_id,
+            batch.client_uuid,
+            &batch.raw_text,
+            plan.total,
+            None,
+            None,
+        )
+        .await?
         {
             Some(id) => Some(id),
             None => return Ok(None),
@@ -159,6 +211,7 @@ pub async fn execute(
             Step::Sale { line_no, .. }
             | Step::Restock { line_no, .. }
             | Step::AdjustDown { line_no, .. }
+            | Step::SetPrice { line_no, .. }
             | Step::CreateProduct { line_no, .. }
             | Step::DeleteProduct { line_no, .. } => *line_no,
         };
@@ -184,10 +237,18 @@ pub async fn execute(
                     touched.insert(id);
                 }
                 Step::AdjustDown {
-                    product, quantity, ..
+                    product,
+                    quantity,
+                    note,
+                    ..
                 } => {
                     let id = resolve(&created, product)?;
-                    products::move_stock(tx, id, -quantity, "adjustment", None).await?;
+                    products::move_stock(tx, id, -quantity, "adjustment", note.as_deref()).await?;
+                    touched.insert(id);
+                }
+                Step::SetPrice { product, price, .. } => {
+                    let id = resolve(&created, product)?;
+                    products::set_price(tx, user_id, id, price).await?;
                     touched.insert(id);
                 }
                 Step::CreateProduct {

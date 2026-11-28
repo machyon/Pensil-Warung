@@ -145,12 +145,18 @@ async fn top_items_group_by_product_and_fall_back_to_the_snapshot_name() {
     assert_eq!(res.status, StatusCode::OK, "{}", res.text);
 
     let j = get(&app, &t, "/month?month=2026-03").await;
+    let items = j["top_items"].as_array().unwrap();
+    assert!(items[0]["product_id"].is_i64());
+    assert_eq!(items[1]["product_id"], teh);
     assert_eq!(
-        j["top_items"],
-        json!([
-            {"name": "Nasi goreng", "qty": 4, "revenue": 40000, "stock": 996},
-            {"name": "Teh manis", "qty": 3, "revenue": 15000, "stock": 17},
-        ])
+        items
+            .iter()
+            .map(|i| (&i["name"], &i["qty"], &i["revenue"], &i["stock"]))
+            .collect::<Vec<_>>(),
+        [
+            (&json!("Nasi goreng"), &json!(4), &json!(40000), &json!(996)),
+            (&json!("Teh manis"), &json!(3), &json!(15000), &json!(17)),
+        ]
     );
 
     // Delete the product: it now groups by the name on the sale and has no stock.
@@ -164,6 +170,7 @@ async fn top_items_group_by_product_and_fall_back_to_the_snapshot_name() {
     assert_eq!(items[1]["name"], "Es teh");
     assert_eq!(items[1]["qty"], 3);
     assert_eq!(items[1]["stock"], Value::Null);
+    assert_eq!(items[1]["product_id"], Value::Null);
 }
 
 #[tokio::test]

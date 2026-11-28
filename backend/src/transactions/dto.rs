@@ -39,6 +39,18 @@ impl From<&Row> for ItemResponse {
     }
 }
 
+/// An older version of a revised sale.
+#[derive(Serialize)]
+pub struct HistoryEntry {
+    pub id: i64,
+    pub raw_text: String,
+    pub total: i64,
+    pub occurred_at: String,
+    /// When the next version replaced this one (its `voided_at`).
+    pub revised_at: Option<String>,
+    pub items: Vec<ItemResponse>,
+}
+
 #[derive(Serialize)]
 pub struct TransactionResponse {
     pub id: i64,
@@ -48,13 +60,18 @@ pub struct TransactionResponse {
     pub occurred_at: String,
     pub voided_at: Option<String>,
     pub void_reason: Option<String>,
+    pub replaces_id: Option<i64>,
+    /// Set on a replaced row; a cancelled row has `status: "voided"` and `null` here.
+    pub replaced_by_id: Option<i64>,
+    /// Older versions, newest first. Empty when never revised.
+    pub history: Vec<HistoryEntry>,
     pub items: Vec<ItemResponse>,
 }
 
 impl TransactionResponse {
     /// `row` columns: `id, raw_text, total, status` (text), `occurred_at`,
-    /// `voided_at`, `void_reason`.
-    pub fn new(row: &Row, items: Vec<ItemResponse>) -> Self {
+    /// `voided_at`, `void_reason`, `replaces_id`, `replaced_by_id`.
+    pub fn new(row: &Row, items: Vec<ItemResponse>, history: Vec<HistoryEntry>) -> Self {
         TransactionResponse {
             id: row.get("id"),
             raw_text: row.get("raw_text"),
@@ -65,6 +82,9 @@ impl TransactionResponse {
                 .get::<_, Option<OffsetDateTime>>("voided_at")
                 .map(rfc3339),
             void_reason: row.get("void_reason"),
+            replaces_id: row.get("replaces_id"),
+            replaced_by_id: row.get("replaced_by_id"),
+            history,
             items,
         }
     }

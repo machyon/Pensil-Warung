@@ -1,0 +1,178 @@
+import 'package:go_router/go_router.dart';
+import 'package:material_ui/material_ui.dart';
+
+import '../data/session.dart';
+import '../domain/transaction.dart';
+import '../domain/user.dart';
+import '../ui/core/widgets/main_nav.dart';
+import '../ui/core/widgets/placeholder_tab.dart';
+import '../ui/auth/login_screen.dart';
+import '../ui/broadcaster/broadcast_detail_screen.dart';
+import '../ui/broadcaster/kirim_screen.dart';
+import '../ui/broadcaster/siaran_screen.dart';
+import '../ui/broadcaster/tulis_screen.dart';
+import '../ui/auth/register_screen.dart';
+import '../ui/landing/landing_screen.dart';
+import '../ui/catat/catat_screen.dart';
+import '../ui/histori/barang_screen.dart';
+import '../ui/histori/day_list_screen.dart';
+import '../ui/histori/detail_screen.dart';
+import '../ui/histori/edit_screen.dart';
+import '../ui/histori/histori_screen.dart';
+import '../ui/notifications/notifikasi_screen.dart';
+import '../ui/products/product_list_screen.dart';
+import '../ui/settings/about_screen.dart';
+import '../ui/settings/delete_account_screen.dart';
+import '../ui/settings/email_screen.dart';
+import '../ui/settings/legal_screen.dart';
+import '../ui/settings/legal_text.dart';
+import '../ui/settings/password_screen.dart';
+import '../ui/settings/settings_screen.dart';
+import '../ui/settings/username_screen.dart';
+import '../ui/products/product_routes.dart';
+import '../ui/splash/splash_gate.dart';
+
+const _userTabs = ['/produk', '/catat', '/histori'];
+const _broadcasterTabs = ['/siaran', '/tulis', '/akun'];
+
+/// Full-screen history screens, pushed over any tab (Catat links to a Detail too).
+const _userExtras = ['/hari', '/transaksi', '/barang', '/notifikasi'];
+
+const _publicPaths = ['/welcome', '/masuk', '/daftar'];
+
+/// Where a signed-in user lands; Landing without one.
+String homePath(User? user) => user == null
+    ? '/welcome'
+    : user.isBroadcaster
+        ? '/tulis'
+        : '/catat';
+
+/// Pure redirect rule, split out so it can be tested.
+String? redirectFor(User? user, String path) {
+  if (path == '/') return null; // SplashGate routes itself once it has loaded the session
+  if (user == null) return _publicPaths.contains(path) ? null : '/welcome';
+  final tabs = user.isBroadcaster ? _broadcasterTabs : _userTabs;
+  if (path.startsWith('/pengaturan')) return null; // both roles
+  if (!user.isBroadcaster && _userExtras.any(path.startsWith)) return null;
+  return tabs.any(path.startsWith) ? null : homePath(user);
+}
+
+final rootKey = GlobalKey<NavigatorState>();
+
+/// Tells the router only when the redirect could change (signed in or out, another role).
+/// A new username or token must not rebuild the pushed screens, or Pengaturan loses its state.
+class _AuthChanges extends ChangeNotifier {
+  _AuthChanges(this._session) : _last = _key(_session) {
+    _session.addListener(_onSession);
+  }
+
+  final Session _session;
+  String _last;
+
+  static String _key(Session s) => '${s.user?.id}/${s.user?.role}';
+
+  void _onSession() {
+    final now = _key(_session);
+    if (now == _last) return;
+    _last = now;
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _session.removeListener(_onSession);
+    super.dispose();
+  }
+}
+
+GoRouter buildRouter(Session session, {String initialLocation = '/'}) {
+  StatefulShellRoute shell(List<String> tabs, List<String> titles, List<NavItem> items,
+      {Map<int, Widget> screens = const {}, Map<int, List<RouteBase>> subRoutes = const {}}) {
+    return StatefulShellRoute.indexedStack(
+      builder: (context, state, navigationShell) => Scaffold(
+        body: navigationShell,
+        bottomNavigationBar: MainNav(
+          items: items,
+          selected: navigationShell.currentIndex,
+          onTap: (i) => navigationShell.goBranch(i, initialLocation: i == navigationShell.currentIndex),
+        ),
+      ),
+      branches: [
+        for (var i = 0; i < tabs.length; i++)
+          StatefulShellBranch(routes: [
+            GoRoute(
+              path: tabs[i],
+              builder: (_, _) => screens[i] ?? PlaceholderTab(titles[i]),
+              routes: subRoutes[i] ?? const [],
+            ),
+          ]),
+      ],
+    );
+  }
+
+  final auth = _AuthChanges(session);
+  return GoRouter(
+    navigatorKey: rootKey,
+    initialLocation: initialLocation,
+    refreshListenable: auth,
+    redirect: (context, state) => redirectFor(session.user, state.uri.path),
+    routes: [
+      GoRoute(path: '/', builder: (_, _) => const SplashGate()),
+      GoRoute(path: '/welcome', builder: (_, _) => const LandingScreen()),
+      GoRoute(path: '/masuk', builder: (_, _) => const LoginScreen()),
+      GoRoute(path: '/daftar', builder: (_, _) => const RegisterScreen()),
+      GoRoute(path: '/notifikasi', parentNavigatorKey: rootKey, builder: (_, _) => const NotifikasiScreen()),
+      GoRoute(
+        path: '/pengaturan',
+        parentNavigatorKey: rootKey,
+        builder: (_, _) => const SettingsScreen(),
+        routes: [
+          GoRoute(path: 'username', parentNavigatorKey: rootKey, builder: (_, _) => const UsernameScreen()),
+          GoRoute(path: 'email', parentNavigatorKey: rootKey, builder: (_, _) => const EmailScreen()),
+          GoRoute(path: 'sandi', parentNavigatorKey: rootKey, builder: (_, _) => const PasswordScreen()),
+          GoRoute(path: 'hapus', parentNavigatorKey: rootKey, builder: (_, _) => const DeleteAccountScreen()),
+          GoRoute(path: 'tentang', parentNavigatorKey: rootKey, builder: (_, _) => const AboutScreen()),
+          GoRoute(
+              path: 'syarat',
+              parentNavigatorKey: rootKey,
+              builder: (_, _) => const LegalScreen(title: 'Syarat & Ketentuan', sections: termsSections)),
+          GoRoute(
+              path: 'privasi',
+              parentNavigatorKey: rootKey,
+              builder: (_, _) => const LegalScreen(title: 'Kebijakan Privasi', sections: privacySections)),
+        ],
+      ),
+      GoRoute(path: '/hari/:date', parentNavigatorKey: rootKey, builder: (_, s) => DayListScreen(date: s.pathParameters['date']!)),
+      GoRoute(path: '/barang/:month', parentNavigatorKey: rootKey, builder: (_, s) => BarangScreen(month: s.pathParameters['month']!)),
+      GoRoute(
+        path: '/transaksi/:id',
+        parentNavigatorKey: rootKey,
+        builder: (_, s) => DetailScreen(id: int.tryParse(s.pathParameters['id']!) ?? 0),
+        routes: [
+          GoRoute(
+            path: 'ubah',
+            parentNavigatorKey: rootKey,
+            redirect: (_, s) => s.extra is Transaction ? null : '/transaksi/${s.pathParameters['id']}',
+            builder: (_, s) => EditScreen(tx: s.extra! as Transaction),
+          ),
+        ],
+      ),
+      GoRoute(
+        path: '/siaran/:id',
+        parentNavigatorKey: rootKey,
+        builder: (_, s) => BroadcastDetailScreen(id: int.tryParse(s.pathParameters['id']!) ?? 0),
+      ),
+      shell(
+        _userTabs,
+        ['Produk', 'Catat', 'Histori'],
+        userNavItems,
+        screens: {0: const ProductListScreen(), 1: const CatatScreen(), 2: const HistoriScreen()},
+        subRoutes: {0: productRoutes},
+      ),
+      shell(_broadcasterTabs, ['Siaran', 'Tulis', 'Akun'], broadcasterNavItems, screens: {0: const SiaranScreen(), 1: const TulisScreen(), 2: const SettingsScreen(tab: true)},
+          subRoutes: {
+            1: [GoRoute(path: 'kirim', parentNavigatorKey: rootKey, builder: (_, _) => const KirimScreen())],
+          }),
+    ],
+  );
+}

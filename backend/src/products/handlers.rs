@@ -10,15 +10,16 @@ use serde_json::json;
 use std::collections::HashSet;
 use uuid::Uuid;
 
-use super::dto::{ProductResponse, respond, respond_one};
+use super::dto::{MovementResponse, ProductResponse, respond, respond_one};
 use super::{
-    NewProduct, ProductPatch, clear_photo_key, create, delete, get as get_product, list, photo,
-    set_photo_key, update,
+    NewProduct, ProductPatch, clear_photo_key, create, delete, get as get_product, list,
+    list_movements, photo, set_photo_key, update,
 };
 use crate::auth::extractor::AuthUser;
 use crate::auth::perms::Perm;
 use crate::common::extract::{ApiJson, ApiPath, ApiQuery};
 use crate::common::names::name_key;
+use crate::common::pagination::{Cursor, Page, clamp_limit};
 use crate::common::response::{Created, NoContent};
 use crate::error::{AppError, ErrorCode};
 use crate::state::AppState;
@@ -37,6 +38,7 @@ pub fn routes() -> Router<AppState> {
             "/products/{id}",
             get(get_one).patch(patch_one).delete(delete_one),
         )
+        .route("/products/{id}/movements", get(movements))
         .route(
             "/products/{id}/photo",
             put(put_photo)
@@ -80,6 +82,34 @@ async fn get_one(
     let client = state.pool.get().await?;
     let product = get_product(&**client, user.id, id).await?;
     Ok(Json(respond_one(&state, product).await))
+}
+
+#[derive(Deserialize)]
+struct MovementsQuery {
+    cursor: Option<String>,
+    limit: Option<i64>,
+}
+
+async fn movements(
+    State(state): State<AppState>,
+    user: AuthUser,
+    ApiPath(id): ApiPath<i64>,
+    ApiQuery(q): ApiQuery<MovementsQuery>,
+) -> Result<Json<Page<MovementResponse>>, AppError> {
+    state.perms.require(&user, Perm::ProductManage)?;
+    let after = q.cursor.as_deref().map(Cursor::decode).transpose()?;
+    let limit = clamp_limit(q.limit);
+    let client = state.pool.get().await?;
+    get_product(&**client, user.id, id).await?;
+    let rows = list_movements(&**client, id, after, limit + 1).await?;
+    let page = Page::new(rows, limit, |m| Cursor {
+        occurred_at: m.created_at,
+        id: m.id,
+    });
+    Ok(Json(Page {
+        items: page.items.into_iter().map(MovementResponse::from).collect(),
+        next_cursor: page.next_cursor,
+    }))
 }
 
 /// All fields optional. `stock` is the new absolute stock (an integer).

@@ -23,7 +23,7 @@ Mobile sales notebook for small Indonesian warung owners (UI text is Indonesian)
 - `users`: `email`, `display_name`, `username`, `role_id`, `token_version` (starts at 0, bumped on email or password change; a JWT whose `ver` differs is rejected).
 - `auth_identities`: one row per login method per user.
 - `products`: name (unique per user, case-insensitive), price, stock, optional photo (`photo_key`, a Tigris object key; the API returns presigned URLs).
-- `transactions`: one "Simpan" = one transaction. Holds `raw_text`, `total`, `status` (completed or voided).
+- `transactions`: one "Simpan" = one transaction. Holds `raw_text`, `total`, `status` (completed or voided). `replaces_id` (self FK, unique where not null) links a revision to the voided row it replaces; a voided row with no row pointing at it was cancelled, not revised.
 - `transaction_items`: snapshot of name and price at sale time.
 - `stock_movements`: ledger of every stock change (initial, sale, void_sale, restock, adjustment).
 - `broadcasts`: category, title (60), summary (120), optional body, status (scheduled, sent, cancelled), `broadcasted_at` is the sent time. The view `v_broadcasts` adds `effective_status` and `shown_at` (see the read-time rule below).
@@ -31,7 +31,7 @@ Mobile sales notebook for small Indonesian warung owners (UI text is Indonesian)
 ## Rules to keep
 - Never `UPDATE products.stock`. Insert a `stock_movements` row; a trigger applies it. Selling more than the stock fails with SQLSTATE 23514 and rolls back the whole sale.
 - Insert a transaction, then its items, in one database transaction; item triggers create the sale movements. Pass `total` and each `line_total = round(quantity * unit_price)`.
-- Transactions are never deleted. Void them (`status = 'voided'` and set `voided_at`): stock is restored and a void cannot be undone.
+- Transactions are never deleted. Void them (`status = 'voided'` and set `voided_at`): stock is restored and a void cannot be undone. A revision (`POST /transactions/{id}/revise`) voids the old row first, then inserts the new row and items, so the void trigger restores stock and the item trigger takes it.
 - Deleting a product is a hard delete. Past sale items keep their name and price (`product_id` becomes NULL). The product's stock movements are deleted with it.
 - Broadcast feed query: `SELECT … FROM v_broadcasts WHERE effective_status = 'sent' ORDER BY shown_at DESC, id DESC LIMIT 5`. No per-user cursor or read-state. A broadcast counts as sent when `status = 'sent' OR (status = 'scheduled' AND scheduled_for <= now())`, and `shown_at = coalesce(broadcasted_at, scheduled_for)`. Editing or cancelling needs `status = 'scheduled' AND scheduled_for > now()`.
 - Names: `display_name` allows only letters, digits and spaces. The database does not clean names, it rejects bad ones (check `users_display_name_chars`). The trigger only fills a blank name with `user <n>`.

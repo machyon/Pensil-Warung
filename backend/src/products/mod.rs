@@ -16,6 +16,7 @@ use tokio_postgres::{GenericClient, Row};
 use uuid::Uuid;
 
 use crate::common::names::{name_key, normalize_product_name};
+use crate::common::pagination::Cursor;
 use crate::common::validate::{max_len, non_negative_money};
 use crate::error::{AppError, AppResult, ErrorCode};
 
@@ -78,6 +79,15 @@ impl NewProduct {
     }
 }
 
+/// A movement note: trimmed, blank is none, at most 200 characters.
+pub fn clean_note(note: Option<&str>) -> AppResult<Option<String>> {
+    let note = note.map(str::trim).filter(|n| !n.is_empty());
+    if let Some(n) = note {
+        max_len("note", n, 200)?;
+    }
+    Ok(note.map(str::to_owned))
+}
+
 /// A validated PATCH: at least one field, normalized name, `note` only with `stock`.
 pub struct ProductPatch {
     name: Option<String>,
@@ -105,15 +115,12 @@ impl ProductPatch {
         }
         // Reuse the create rules; the placeholders for omitted fields always pass.
         let checked = NewProduct::new(name.unwrap_or("x"), price.unwrap_or(0), stock.unwrap_or(0))?;
-        let note = note.map(str::trim).filter(|n| !n.is_empty());
-        if let Some(n) = note {
-            max_len("note", n, 200)?;
-        }
+        let note = clean_note(note)?;
         Ok(ProductPatch {
             name: name.map(|_| checked.name),
             price,
             stock: stock.map(|_| checked.stock),
-            note: note.map(str::to_owned),
+            note,
         })
     }
 }
@@ -175,6 +182,26 @@ pub async fn update(
     let product = get(&tx, user_id, id).await?;
     tx.commit().await?;
     Ok(product)
+}
+
+/// Sets the price of one of the user's products (same price rule as `update`).
+pub async fn set_price(
+    client: &impl GenericClient,
+    user_id: Uuid,
+    id: i64,
+    price: i64,
+) -> AppResult<()> {
+    non_negative_money("price", price)?;
+    let n = client
+        .execute(
+            "UPDATE products SET price = $3 WHERE id = $1 AND user_id = $2",
+            &[&id, &user_id, &price],
+        )
+        .await?;
+    if n != 1 {
+        return Err(AppError::not_found());
+    }
+    Ok(())
 }
 
 /// Deletes one of the user's products (movements cascade, sale snapshots stay).
@@ -279,6 +306,51 @@ pub async fn get(client: &impl GenericClient, user_id: Uuid, id: i64) -> AppResu
         .await?
         .ok_or_else(AppError::not_found)?;
     Ok(Product::from(&row))
+}
+
+/// One page of a product's stock ledger, newest first, after `after` when given.
+/// Callers pass `limit + 1` and check the product's ownership first.
+pub async fn list_movements(
+    client: &impl GenericClient,
+    product_id: i64,
+    after: Option<Cursor>,
+    limit: i64,
+) -> AppResult<Vec<Movement>> {
+    let (at, id) = after.map_or((None, None), |c| (Some(c.occurred_at), Some(c.id)));
+    let rows = client
+        .query(
+            "SELECT m.id, m.reason::text, m.delta, m.stock_after, m.note, m.created_at, ti.transaction_id
+             FROM stock_movements m
+             LEFT JOIN transaction_items ti ON ti.id = m.transaction_item_id
+             WHERE m.product_id = $1
+               AND ($2::timestamptz IS NULL OR (m.created_at, m.id) < ($2, $3))
+             ORDER BY m.created_at DESC, m.id DESC
+             LIMIT $4",
+            &[&product_id, &at, &id, &limit],
+        )
+        .await?;
+    Ok(rows
+        .iter()
+        .map(|r| Movement {
+            id: r.get(0),
+            reason: r.get(1),
+            delta: r.get(2),
+            stock_after: r.get(3),
+            note: r.get(4),
+            created_at: r.get(5),
+            transaction_id: r.get(6),
+        })
+        .collect())
+}
+
+pub struct Movement {
+    pub id: i64,
+    pub reason: String,
+    pub delta: Decimal,
+    pub stock_after: Decimal,
+    pub note: Option<String>,
+    pub created_at: OffsetDateTime,
+    pub transaction_id: Option<i64>,
 }
 
 /// `%q%` for ILIKE with `%`, `_` and `\` escaped; `None` for a missing or blank `q`.

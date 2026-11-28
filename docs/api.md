@@ -66,7 +66,9 @@ The default status and message come from `backend/src/error.rs`. "Used" says whe
 | `reauth_required` | 401 | Silakan verifikasi ulang akun Anda untuk melanjutkan. | now | `DELETE /me` for a Google-only account without a fresh matching Google ID token |
 | `stock_insufficient` | 422 | Stok tidak cukup. | now | Line code in `lines_invalid` (`POST /catat`): a sale or `adjust_down` would take stock below zero. Not reachable from `/products` (PATCH sets an absolute stock >= 0). A bare 422 with this code is only the SQL map for the same check |
 | `nothing_to_update` | 422 | Tidak ada data yang diubah. | now | `PATCH /products/{id}` with no fields |
-| `already_voided` | 409 | Transaksi ini sudah dibatalkan. | now | `POST /transactions/{id}/void` on a transaction that is already voided |
+| `already_voided` | 409 | Transaksi ini sudah dibatalkan. | now | `POST /transactions/{id}/void` or `/revise` on a transaction that is already voided (cancelled or replaced) |
+| `item_not_found` | 422 | Item tidak ditemukan pada transaksi ini. | now | Line code in `lines_invalid` (`POST /transactions/{id}/revise`): the `item_id` is not an item of the transaction, or is listed twice |
+| `no_changes` | 422 | Tidak ada perubahan. | now | `POST /transactions/{id}/revise` with the same items and quantities and nothing added |
 | `not_editable` | 409 | Data ini tidak dapat diubah. | later | The record cannot be changed in its current state |
 | `time_passed` | 422 | Waktu untuk tindakan ini sudah lewat. | later | The time window for an action has passed |
 | `payload_too_large` | 413 | Ukuran berkas terlalu besar. | now | Body is over the limit, or the `photo` file is over 5 MB (`PUT /products/{id}/photo`). The message says "berkas" (file) even for JSON |
@@ -192,7 +194,7 @@ All `/me` routes need a bearer token (any role). The `PATCH` routes return the u
 ```
 
 - The email is trimmed and lowercased. There is no verification email.
-- On success all of the user's tokens stop working, including the one used for this call: the next request gets `401 unauthorized`, so the client must log in again with the new email. The response is still `200` with the updated user.
+- On success every older token stops working, including the one used for this call. The `200` body is the login body, `{ "token", "user" }`; the new token works, so the client swaps it in and stays signed in. Other devices must log in again.
 - Errors: `invalid_value` (422), `invalid_credentials` (401, wrong password), `google_account` (403, Google-only account), `email_taken` (409).
 
 ### PUT /api/v1/me/password
@@ -201,8 +203,8 @@ All `/me` routes need a bearer token (any role). The `PATCH` routes return the u
 { "current_password": "rahasia123", "new_password": "rahasia456" }
 ```
 
-- `new_password` is 8 to 128 characters. `204 No Content`.
-- On success all of the user's tokens stop working, including the one used for this call: the client must log in again with the new password.
+- `new_password` is 8 to 128 characters.
+- On success every older token stops working, including the one used for this call. The `200` body is the login body, `{ "token", "user" }`; the new token works, so the client swaps it in and stays signed in. Other devices must log in again.
 - The `details.field` of a length error is `new_password`.
 - Errors: `invalid_value` (422), `invalid_credentials` (401), `google_account` (403).
 
@@ -283,6 +285,12 @@ All fields are optional; `200 OK` with the updated product.
 
 `204 No Content`; `404 not_found` if it is not the user's. A hard delete: the product's stock movements go with it, while past sale items keep their name and price snapshot (their `product_id` becomes null).
 
+### GET /api/v1/products/{id}/movements?cursor=&limit=
+
+`200 OK` with `{ "items": [movement], "next_cursor": null }`: the product's stock ledger, newest first, keyset-paged like the transaction list (`limit` 1-100, default 20; `cursor` is the opaque `next_cursor` of the previous page, a bad one is `422 invalid_value` on `cursor`). `404 not_found` if the product is not the user's.
+
+A movement: `{ "id", "reason", "delta", "stock_after", "note", "created_at", "transaction_id" }`. `reason` is `initial`, `sale`, `void_sale`, `restock` or `adjustment`. `delta` (signed) and `stock_after` are whole numbers. `transaction_id` is the sale the row belongs to, `null` for non-sale rows or when the sale item is gone.
+
 ### Photos
 
 `photo_url` is a presigned URL for the product's photo, or `null` when the product has no photo (or the server has no photo storage). The URL expires after `IMAGE_URL_TTL_SECONDS` (default 3600) and is different on every response, so the client should cache the image by product id plus photo (for example `updated_at` after a photo change), not by URL. Every product response carries it: list, get, create, bulk, patch and the photo PUT.
@@ -330,7 +338,8 @@ Ops (`product` is matched against the user's product names ignoring case and ext
 |---|---|---|
 | `sale` | `product`, `quantity` | An item on the batch's one transaction. The price is always the product's current `price` |
 | `restock` | `product`, `quantity` | Stock movement `restock`, `+quantity`. No transaction |
-| `adjust_down` | `product`, `quantity` | Stock movement `adjustment`, `-quantity` (damaged or lost goods). No transaction |
+| `adjust_down` | `product`, `quantity`, optional `note` | Stock movement `adjustment`, `-quantity` (damaged or lost goods). No transaction. `note` is trimmed, blank counts as none, over 200 characters is line error `invalid_value`; it is stored on the movement |
+| `set_price` | `product`, `price` | Sets the product's `price` (a whole number >= 0, else `invalid_price`). Later `sale` lines in the batch use the new price, earlier ones the old |
 | `create_product` | `name`, `price`, `stock` | A new product. A `stock` above 0 gets an `initial` movement |
 | `delete_product` | `product` | Hard delete, plus the photo object. Past sale items keep their snapshot with `product_id: null` |
 
@@ -345,21 +354,22 @@ Response `201 Created`:
   "transaction": {
     "id": 12, "raw_text": "...", "total": 39000, "status": "completed",
     "occurred_at": "2026-11-26T08:00:00Z", "voided_at": null, "void_reason": null,
+    "replaces_id": null, "replaced_by_id": null, "history": [],
     "items": [
       { "id": 30, "line_no": 1, "product_id": 5, "product_name": "Nasi goreng",
         "unit_price": 15000, "quantity": 2, "line_total": 30000 }
     ]
   },
-  "products_changed": [ { "id": 5, "name": "Nasi goreng", "stock": 8 } ],
+  "products_changed": [ { "id": 5, "name": "Nasi goreng", "price": 15000, "stock": 8 } ],
   "products_deleted": [ 9 ]
 }
 ```
 
 - `transaction` is `null` when the batch had no sale. Its shape is the transaction object that the transaction endpoints reuse.
-- `products_changed`: every product the batch touched (sold, restocked, adjusted or created) and that still exists, with its final stock, ordered by id. Use it to refresh the local stock.
+- `products_changed`: every product the batch touched (sold, restocked, adjusted, repriced or created) and that still exists, with its final price and stock, ordered by id. Use it to refresh the local stock.
 - `products_deleted`: ids of existing products the batch deleted. A product created and deleted in the same batch appears in neither list.
 
-Replay: if the user already has a transaction with this `client_uuid`, nothing is executed and the answer is `200 OK` with the stored transaction. `products_changed` then lists the products in that transaction's items that still exist, with their current stock (which may differ from the first answer), and `products_deleted` is `[]`. The ops in a replayed request are not compared with the stored ones. A concurrent duplicate is treated the same way.
+Replay: if the user already has a transaction with this `client_uuid`, nothing is executed and the answer is `200 OK` with the stored transaction. `products_changed` then lists the products in that transaction's items that still exist, with their current price and stock (which may differ from the first answer), and `products_deleted` is `[]`. The ops in a replayed request are not compared with the stored ones. A concurrent duplicate is treated the same way.
 
 Command-only batches are not retry-safe: a batch with no `sale` line stores no transaction, so a retry with the same `client_uuid` runs again (a repeated restock adds the stock twice). This is accepted for now because there is no offline mode.
 
@@ -387,8 +397,9 @@ One command per line, case-insensitive. The client checks the prefixes in this o
 | Typed line | Op |
 |---|---|
 | `tambah stok <name> <qty>` | `restock` |
-| `hapus stok <name> <qty>` | `adjust_down` |
+| `hapus stok <name> <qty> [alasan <reason>]` | `adjust_down` (with `note`) |
 | `buat produk <name> harga <price> stok <stock>` | `create_product` |
+| `ubah harga <name> <price>` | `set_price` |
 | `hapus <name>` | `delete_product` |
 | `<name> <qty>` | `sale` |
 
@@ -396,7 +407,7 @@ Voiding a sale is not a command; it is a transaction endpoint.
 
 ## Transactions
 
-Needs `transaction.read` (list, detail) or `transaction.void` (void), else `403 forbidden`. Every route only sees the caller's own transactions; another user's id is `404 not_found`. Transactions are created by `POST /catat` and are never deleted, only voided.
+Needs `transaction.read` (list, detail), `transaction.void` (void) or both `transaction.create` and `transaction.void` (revise), else `403 forbidden`. Every route only sees the caller's own transactions; another user's id is `404 not_found`. Transactions are created by `POST /catat` and are never deleted, only voided.
 
 ### GET /api/v1/transactions?date=&cursor=&limit=
 
@@ -421,12 +432,15 @@ One calendar day of the caller's transactions, newest first. Days are Asia/Jakar
 
 - Paging is keyset on `(occurred_at, id)` descending, so rows added or voided while paging never cause a duplicate. `next_cursor` is `null` on the last page.
 - `day` counts completed sales only, for the whole day (not just this page). It is sent on the first page (no `cursor`) and is `null` on later pages.
-- Voided transactions are listed with `status: "voided"`; they are not counted in `day`.
+- Voided transactions are listed with `status: "voided"`; they are not counted in `day`. A row that was replaced by a revision is hidden (its replacement is listed instead).
 - `item_count` is the number of lines. `summary` names the first 3 lines in `line_no` order as "name quantity", joined by ", ", then " +N lainnya" when there are more.
 
 ### GET /api/v1/transactions/{id}
 
-`200 OK` with the transaction object (the same shape as `transaction` in `POST /catat`): `id`, `raw_text`, `total`, `status` (`completed` or `voided`), `occurred_at`, `voided_at`, `void_reason` and `items[]`. Errors: `not_found` (404).
+`200 OK` with the transaction object (the same shape as `transaction` in `POST /catat`): `id`, `raw_text`, `total`, `status` (`completed` or `voided`), `occurred_at`, `voided_at`, `void_reason`, `replaces_id`, `replaced_by_id`, `history[]` and `items[]`. Errors: `not_found` (404).
+
+- `replaces_id` is the row this one revised, `replaced_by_id` the row that revised this one (both `null` when none). A cancelled row has `status: "voided"` and `replaced_by_id: null`; a replaced row has `status: "voided"` and `replaced_by_id` set.
+- `history[]` lists every older version, newest first: `{ id, raw_text, total, occurred_at, revised_at, items[] }` (`revised_at` is when the next version replaced it). `[]` means never revised ("Belum pernah diubah").
 
 ### POST /api/v1/transactions/{id}/void
 
@@ -443,6 +457,29 @@ Request body is optional: no body (or an empty one) means no reason. A body with
 - Voiding is final; there is no un-void.
 
 Errors: `not_found` (404, no such transaction for this user), `already_voided` (409), `invalid_value` (422), `forbidden` (403).
+
+### POST /api/v1/transactions/{id}/revise
+
+Edits a sale: voids it and inserts a new transaction with the same `occurred_at`, linked by `replaces_id`, in one database transaction. Needs `transaction.create` and `transaction.void`.
+
+```json
+{
+  "client_uuid": "0193...",
+  "items": [
+    { "item_id": 41, "quantity": 3 },
+    { "product_id": 7, "quantity": 1 }
+  ]
+}
+```
+
+- `items` is the full new list, 1 to 200 lines (an empty list is `422 invalid_body`; void the sale instead). `{item_id, quantity}` keeps an item of this transaction with its name and `unit_price` snapshot (also when the product was deleted). `{product_id, quantity}` adds a line at the product's current price and name. Old items not listed are removed. `line_no` follows the order of `items`. Each line has exactly one of `item_id` or `product_id`, else `422 invalid_body`.
+- `quantity` is a whole number from 1 to 999999999.
+- `raw_text` of the new row is regenerated, one `"<name> <quantity>"` line per item. The old row keeps the typed text.
+- `client_uuid` is required. A repeat with the same `client_uuid` returns `200 OK` with the stored transaction.
+- `201 Created` with the new transaction (the shape of `GET /transactions/{id}`, including `replaces_id` and `history`).
+- Stock is checked as if the old sale were voided first (stock + old quantity - new quantity per product).
+
+Errors: `not_found` (404), `already_voided` (409, cancelled or already replaced), `invalid_body` (422), `lines_invalid` (422) with `details.lines[{ line_no, code, message }]` where `line_no` is the 1-based index in `items` and `code` is `item_not_found` (not an item of this transaction, or listed twice), `product_not_found`, `invalid_quantity` or `stock_insufficient`, `no_changes` (422, same items and quantities and nothing added), `forbidden` (403).
 
 ## Analytics
 
@@ -468,7 +505,7 @@ Grouping and names: items are grouped by product when the product still exists, 
   "previous": { "month": "2026-10", "revenue": 16800000, "change_pct": 8.2 },
   "trend": [ { "month": "2025-12", "revenue": 21400000 } ],
   "weekday_avg": [ { "weekday": 1, "avg_revenue": 887000 } ],
-  "top_items": [ { "name": "Es teh manis", "qty": 512, "revenue": 2560000, "stock": 37 } ]
+  "top_items": [ { "product_id": 12, "name": "Es teh manis", "qty": 512, "revenue": 2560000, "stock": 37 } ]
 }
 ```
 
@@ -476,7 +513,7 @@ Grouping and names: items are grouped by product when the product still exists, 
 - `previous` is the same day range of the previous month (clamped to its length). `change_pct` is `(revenue - previous) / previous * 100`, rounded half away from zero to one decimal, and `null` when the previous revenue is 0.
 - `trend` has exactly 12 entries, oldest first, ending with `month` (which may be unfinished). Months without sales have `revenue: 0`. The design showed 6 bars, so the client must show 12.
 - `weekday_avg` is `null` while the month has fewer than 14 days with sales. Otherwise it has 7 entries (`weekday` 1 = Monday to 7 = Sunday). Each average is over every calendar day from the 1st to `through_day`, and days without sales count as Rp0 (Mondays = revenue on all Mondays so far divided by the number of Mondays so far).
-- `top_items`: the top 5 over days 1 to `through_day`.
+- `top_items`: the top 5 over days 1 to `through_day`. `product_id` is `null` once the product was deleted.
 
 ### GET /api/v1/analytics/month/days?month=&cursor=&limit=
 

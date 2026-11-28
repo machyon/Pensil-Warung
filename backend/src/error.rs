@@ -24,6 +24,8 @@ pub enum ErrorCode {
     InvalidPrice,
     ProductNotFound,
     LinesInvalid,
+    ItemNotFound,
+    NoChanges,
     NotFound,
     Unauthorized,
     InvalidCredentials,
@@ -60,6 +62,8 @@ impl ErrorCode {
             ErrorCode::InvalidPrice => "invalid_price",
             ErrorCode::ProductNotFound => "product_not_found",
             ErrorCode::LinesInvalid => "lines_invalid",
+            ErrorCode::ItemNotFound => "item_not_found",
+            ErrorCode::NoChanges => "no_changes",
             ErrorCode::NotFound => "not_found",
             ErrorCode::Unauthorized => "unauthorized",
             ErrorCode::InvalidCredentials => "invalid_credentials",
@@ -113,6 +117,11 @@ impl ErrorCode {
                 StatusCode::UNPROCESSABLE_ENTITY,
                 "Ada baris yang tidak valid.",
             ),
+            ErrorCode::ItemNotFound => (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Item tidak ditemukan pada transaksi ini.",
+            ),
+            ErrorCode::NoChanges => (StatusCode::UNPROCESSABLE_ENTITY, "Tidak ada perubahan."),
             ErrorCode::NotFound => (StatusCode::NOT_FOUND, "Data tidak ditemukan."),
             ErrorCode::Unauthorized => (
                 StatusCode::UNAUTHORIZED,
@@ -317,7 +326,7 @@ mod tests {
     use super::*;
     use axum::body::to_bytes;
 
-    const ALL: [ErrorCode; 30] = [
+    const ALL: [ErrorCode; 32] = [
         ErrorCode::InvalidBody,
         ErrorCode::InvalidQuery,
         ErrorCode::InvalidPath,
@@ -327,6 +336,8 @@ mod tests {
         ErrorCode::InvalidPrice,
         ErrorCode::ProductNotFound,
         ErrorCode::LinesInvalid,
+        ErrorCode::ItemNotFound,
+        ErrorCode::NoChanges,
         ErrorCode::NotFound,
         ErrorCode::Unauthorized,
         ErrorCode::InvalidCredentials,
