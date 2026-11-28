@@ -9,11 +9,12 @@ import '../core/format.dart';
 import '../core/theme.dart';
 import '../core/widgets/app_card.dart';
 import '../core/widgets/app_header.dart';
-import '../core/widgets/day_card.dart';
 import '../core/widgets/empty_state.dart';
 import '../core/widgets/error_view.dart';
 import '../core/widgets/month_stepper.dart';
 import '../core/widgets/segmented_tabs.dart';
+import 'analitik_view.dart';
+import 'day_tile.dart';
 import 'histori_view_model.dart';
 import 'month_picker_sheet.dart';
 
@@ -37,7 +38,7 @@ class _Body extends StatefulWidget {
 }
 
 class _BodyState extends State<_Body> {
-  int _tab = 0; // 1 = Analitik (branch 08)
+  int _tab = 0; // 1 = Analitik
 
   @override
   Widget build(BuildContext context) {
@@ -51,8 +52,8 @@ class _BodyState extends State<_Body> {
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
             child: SegmentedTabs(labels: const ['Histori', 'Analitik'], selected: _tab, onChanged: (i) => setState(() => _tab = i)),
           ),
-          Expanded(child: _tab == 1 ? const EmptyState(icon: Icons.bar_chart_rounded, title: 'Analitik segera hadir') : _content(context, vm)),
-          if (_tab == 0 && !vm.isEmpty && vm.error == null && !vm.loading)
+          Expanded(child: _content(context, vm)),
+          if (!vm.isEmpty && vm.error == null && !vm.loading)
             Container(
               decoration: const BoxDecoration(color: AppColors.surface, border: Border(top: BorderSide(color: AppColors.border))),
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -93,6 +94,7 @@ class _BodyState extends State<_Body> {
         ]),
       );
     }
+    if (_tab == 1) return AnalitikView(vm: vm);
     final s = vm.summary;
     final shown = vm.showAll ? vm.days : vm.days.take(_firstDays).toList();
     return RefreshIndicator(
@@ -108,7 +110,7 @@ class _BodyState extends State<_Body> {
           const SizedBox(height: 8),
           if (vm.days.isEmpty && !vm.loading)
             Padding(padding: const EdgeInsets.all(16), child: Text('Belum ada jualan bulan ini.', style: appText(15, color: AppColors.muted))),
-          for (final d in shown) ...[_DayTile(vm: vm, d: d), const SizedBox(height: 8)],
+          for (final d in shown) ...[DayTile(vm: vm, d: d), const SizedBox(height: 8)],
           if (!vm.showAll && vm.days.length > _firstDays)
             TextButton(onPressed: vm.expandList, child: Text('Lihat semua ${vm.days.length} hari', style: appText(15, weight: FontWeight.w700))),
         ],
@@ -165,56 +167,4 @@ class _TopCard extends StatelessWidget {
       ]),
     );
   }
-}
-
-class _DayTile extends StatelessWidget {
-  const _DayTile({required this.vm, required this.d});
-  final HistoriViewModel vm;
-  final DayTotal d;
-
-  @override
-  Widget build(BuildContext context) {
-    final items = vm.dayItems[d.day];
-    return DayCard(
-      title: d.day == HistoriViewModel.today ? 'Hari ini' : dayShort(d.day),
-      subtitle: '${d.count} transaksi',
-      trailing: rupiah(d.revenue),
-      expanded: vm.expanded == d.day,
-      onToggle: () => vm.toggle(d.day),
-      children: [
-        if (vm.expanded == d.day && items == null && vm.dayError != null)
-          ErrorView(error: vm.dayError!, onRetry: vm.retryItems)
-        else if (items == null)
-          const Padding(padding: EdgeInsets.all(8), child: Center(child: CircularProgressIndicator()))
-        else ...[
-          Align(alignment: Alignment.centerLeft, child: Text('Barang terjual', style: appText(13, weight: FontWeight.w700, color: AppColors.muted))),
-          for (final i in items.items) _row(i.name, '${i.qty} terjual', rupiah(i.revenue)),
-          if (items.other > 0) _row('Barang lain', null, rupiah(items.other)),
-          const Divider(height: 24),
-          Row(children: [
-            Expanded(child: Text('Total', style: appText(15, weight: FontWeight.w800))),
-            Text(rupiah(items.total), style: appText(16, weight: FontWeight.w800)),
-          ]),
-          const SizedBox(height: 8),
-          TextButton(
-            onPressed: () => context.push('/hari/${d.day}'),
-            child: Text('Lihat ${d.count} transaksi', style: appText(15, weight: FontWeight.w700)),
-          ),
-        ],
-      ],
-    );
-  }
-
-  Widget _row(String name, String? sub, String amount) => Padding(
-        padding: const EdgeInsets.only(top: 10),
-        child: Row(children: [
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(name, style: appText(15, weight: FontWeight.w700)),
-              if (sub != null) Text(sub, style: appText(13, color: AppColors.muted)),
-            ]),
-          ),
-          Text(amount, style: appText(15, weight: FontWeight.w700)),
-        ]),
-      );
 }

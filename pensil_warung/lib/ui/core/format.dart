@@ -79,3 +79,15 @@ String dayShort(String iso) {
 
 /// `Selasa, 17 November 2026`
 String dayLong(String iso) => wibDate(parseIsoDate(iso));
+
+/// 8.0 -> `8`, 23.4 -> `23,4` (a percentage the API rounded to one decimal).
+String percent(double p) {
+  final t = p.toStringAsFixed(1);
+  return (t.endsWith('.0') ? t.substring(0, t.length - 2) : t).replaceFirst('.', ',');
+}
+
+/// `Okt` for `2026-10`.
+String monthShort(String ym) => monthNames[int.parse(ym.substring(5, 7)) - 1].substring(0, 3);
+
+/// Days in `2026-10`.
+int daysInMonth(String ym) => DateTime.utc(int.parse(ym.substring(0, 4)), int.parse(ym.substring(5, 7)) + 1, 0).day;

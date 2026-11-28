@@ -26,4 +26,8 @@ class AnalyticsRepository {
 
   Future<DayItems> dayItems(String date) async =>
       DayItems.fromJson(await _api.get('/api/v1/analytics/days/$date/items') as Map<String, dynamic>);
+
+  /// Barang terjual; [q] filters the lists by name.
+  Future<MonthItems> monthItems(String month, {String q = ''}) async => MonthItems.fromJson(
+      await _api.get('/api/v1/analytics/month/items', query: {'month': month, if (q.isNotEmpty) 'q': q}) as Map<String, dynamic>);
 }
