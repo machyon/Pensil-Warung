@@ -53,13 +53,22 @@ class _Body extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: const BoxDecoration(color: AppColors.surface, border: Border(top: BorderSide(color: AppColors.border))),
-                child: SecondaryButton(label: 'Batalkan', onPressed: () => _void(context, tx)),
+                child: Row(children: [
+                  Expanded(flex: 10, child: SecondaryButton(label: 'Batalkan', onPressed: () => _void(context, tx))),
+                  const SizedBox(width: 12),
+                  Expanded(flex: 13, child: PrimaryButton(label: 'Ubah', onPressed: () => _edit(context, tx))),
+                ]),
               ),
           ],
         ),
       ),
     );
   }
+}
+
+Future<void> _edit(BuildContext context, Transaction tx) async {
+  final next = await context.push<Transaction>('/transaksi/${tx.id}/ubah', extra: tx);
+  if (next != null && context.mounted) context.pushReplacement('/transaksi/${next.id}');
 }
 
 Future<void> _void(BuildContext context, Transaction tx) async {

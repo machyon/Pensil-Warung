@@ -2,6 +2,7 @@ import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../data/session.dart';
+import '../domain/transaction.dart';
 import '../domain/user.dart';
 import '../ui/core/widgets/main_nav.dart';
 import '../ui/core/widgets/placeholder_tab.dart';
@@ -11,6 +12,7 @@ import '../ui/landing/landing_screen.dart';
 import '../ui/catat/catat_screen.dart';
 import '../ui/histori/day_list_screen.dart';
 import '../ui/histori/detail_screen.dart';
+import '../ui/histori/edit_screen.dart';
 import '../ui/histori/histori_screen.dart';
 import '../ui/products/product_list_screen.dart';
 import '../ui/products/product_routes.dart';
@@ -82,6 +84,14 @@ GoRouter buildRouter(Session session, {String initialLocation = '/'}) {
         path: '/transaksi/:id',
         parentNavigatorKey: rootKey,
         builder: (_, s) => DetailScreen(id: int.tryParse(s.pathParameters['id']!) ?? 0),
+        routes: [
+          GoRoute(
+            path: 'ubah',
+            parentNavigatorKey: rootKey,
+            redirect: (_, s) => s.extra is Transaction ? null : '/transaksi/${s.pathParameters['id']}',
+            builder: (_, s) => EditScreen(tx: s.extra! as Transaction),
+          ),
+        ],
       ),
       shell(
         _userTabs,
