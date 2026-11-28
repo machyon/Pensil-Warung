@@ -1,6 +1,5 @@
 import '../../catat/parser.dart';
 import '../../domain/product.dart';
-import '../../ui/core/format.dart';
 import '../api_client.dart';
 import 'product_repository.dart';
 
@@ -39,11 +38,6 @@ class CatatSaved {
   final List<Product> changed;
 }
 
-class DaySummary {
-  const DaySummary(this.count, this.revenue);
-  final int count, revenue;
-}
-
 class CatatRepository {
   CatatRepository(this._api, this._products);
 
@@ -63,20 +57,5 @@ class CatatRepository {
       [for (final id in j['products_deleted'] as List? ?? const []) id as int],
     );
     return CatatSaved(j);
-  }
-
-  /// Today's completed sales (WIB).
-  Future<DaySummary> today() async {
-    final j = await _api.get('/api/v1/transactions', query: {'date': wibIsoDate(DateTime.now()), 'limit': '1'})
-        as Map<String, dynamic>;
-    final d = j['day'] as Map<String, dynamic>;
-    return DaySummary(d['transaction_count'] as int, d['revenue'] as int);
-  }
-
-  Future<void> voidTransaction(int id) async {
-    await _api.post('/api/v1/transactions/$id/void', body: {'reason': 'salah catat'});
-    try {
-      await _products.load(); // stock came back
-    } catch (_) {}
   }
 }

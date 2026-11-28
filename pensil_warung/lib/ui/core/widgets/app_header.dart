@@ -102,9 +102,10 @@ class AppHeader extends StatelessWidget {
 
 /// Back arrow + title for pushed screens.
 class BackHeader extends StatelessWidget {
-  const BackHeader({super.key, required this.title, this.onBack});
+  const BackHeader({super.key, required this.title, this.onBack, this.trailing});
 
   final String title;
+  final Widget? trailing;
   final VoidCallback? onBack;
 
   @override
@@ -121,6 +122,7 @@ class BackHeader extends StatelessWidget {
           Expanded(
             child: Text(title, style: appText(20, weight: FontWeight.w800)),
           ),
+          ?trailing,
         ],
       ),
     );

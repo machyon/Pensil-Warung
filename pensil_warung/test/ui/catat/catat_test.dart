@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:pensil_warung/data/api_client.dart';
 import 'package:pensil_warung/data/repositories/catat_repository.dart';
+import 'package:pensil_warung/data/repositories/transaction_repository.dart';
 import 'package:pensil_warung/data/repositories/product_repository.dart';
 import 'package:pensil_warung/domain/product.dart';
 import 'package:pensil_warung/ui/catat/catat_view_model.dart';
@@ -37,7 +38,7 @@ void main() {
     products = ProductRepository(api)
       ..items = const [Product(id: 5, name: 'Nasi goreng', price: 15000, stock: 10)]
       ..loaded = true;
-    vm = CatatViewModel(CatatRepository(api, products), products);
+    vm = CatatViewModel(CatatRepository(api, products), products, TransactionRepository(api, products));
   });
 
   tearDown(() => vm.dispose());

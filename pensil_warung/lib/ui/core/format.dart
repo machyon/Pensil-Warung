@@ -67,3 +67,15 @@ String wibRelative(DateTime t, {DateTime? now}) {
 
 /// `15000` -> `15.000`, the Rp field's text.
 String groupedDigits(int n) => _grouped.format(n);
+
+/// `2026-11-17` (a WIB date) -> the instant it starts, for the helpers above.
+DateTime parseIsoDate(String iso) => DateTime.parse('${iso}T00:00:00+07:00');
+
+/// `Sen, 16 Nov`
+String dayShort(String iso) {
+  final w = wib(parseIsoDate(iso));
+  return '${dayNames[w.weekday - 1].substring(0, 3)}, ${w.day} ${monthNames[w.month - 1].substring(0, 3)}';
+}
+
+/// `Selasa, 17 November 2026`
+String dayLong(String iso) => wibDate(parseIsoDate(iso));

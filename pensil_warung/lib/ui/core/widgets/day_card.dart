@@ -5,12 +5,16 @@ import 'app_card.dart';
 
 /// Expandable "Per hari" card: a title row (day, total) that reveals [children].
 class DayCard extends StatefulWidget {
-  const DayCard({super.key, required this.title, this.subtitle, required this.trailing, this.children = const []});
+  const DayCard({super.key, required this.title, this.subtitle, required this.trailing, this.children = const [], this.expanded, this.onToggle});
 
   final String title;
   final String? subtitle;
   final String trailing;
   final List<Widget> children;
+
+  /// Controlled mode (only one card open at a time): set both, and [children] may be empty while loading.
+  final bool? expanded;
+  final VoidCallback? onToggle;
 
   @override
   State<DayCard> createState() => _DayCardState();
@@ -19,6 +23,9 @@ class DayCard extends StatefulWidget {
 class _DayCardState extends State<DayCard> {
   bool _open = false;
 
+  bool get _controlled => widget.onToggle != null;
+  bool get _isOpen => _controlled ? widget.expanded ?? false : _open;
+
   @override
   Widget build(BuildContext context) {
     return AppCard(
@@ -26,7 +33,7 @@ class _DayCardState extends State<DayCard> {
       child: Column(
         children: [
           InkWell(
-            onTap: widget.children.isEmpty ? null : () => setState(() => _open = !_open),
+            onTap: _controlled ? widget.onToggle : widget.children.isEmpty ? null : () => setState(() => _open = !_open),
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Row(
@@ -42,13 +49,13 @@ class _DayCardState extends State<DayCard> {
                     ),
                   ),
                   Text(widget.trailing, style: appText(16, weight: FontWeight.w800)),
-                  if (widget.children.isNotEmpty)
-                    Icon(_open ? Icons.expand_less : Icons.expand_more, color: AppColors.muted),
+                  if (_controlled || widget.children.isNotEmpty)
+                    Icon(_isOpen ? Icons.expand_less : Icons.expand_more, color: AppColors.muted),
                 ],
               ),
             ),
           ),
-          if (_open) ...[
+          if (_isOpen) ...[
             const Divider(height: 1),
             Padding(padding: const EdgeInsets.all(16), child: Column(children: widget.children)),
           ],
