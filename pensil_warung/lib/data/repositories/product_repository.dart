@@ -29,6 +29,21 @@ class ProductRepository extends ChangeNotifier {
     } catch (_) {}
   }
 
+  /// Merge a save's `products_changed` / `products_deleted` into the cache. The answer has no
+  /// photo, so an existing product keeps its own.
+  void applyChanges(List<Product> changed, List<int> deleted) {
+    final byId = {for (final p in items) p.id: p};
+    for (final p in changed) {
+      final old = byId[p.id];
+      byId[p.id] = old == null || p.photoUrl != null
+          ? p
+          : Product(id: p.id, name: p.name, price: p.price, stock: p.stock, photoUrl: old.photoUrl);
+    }
+    deleted.forEach(byId.remove);
+    items = byId.values.toList()..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    notifyListeners();
+  }
+
   void clear() {
     items = const [];
     loaded = false;
