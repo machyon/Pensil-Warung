@@ -18,6 +18,7 @@ import '../ui/histori/histori_screen.dart';
 import '../ui/notifications/notifikasi_screen.dart';
 import '../ui/products/product_list_screen.dart';
 import '../ui/settings/settings_screen.dart';
+import '../ui/settings/username_screen.dart';
 import '../ui/products/product_routes.dart';
 import '../ui/splash/splash_gate.dart';
 
@@ -115,6 +116,9 @@ GoRouter buildRouter(Session session, {String initialLocation = '/'}) {
         path: '/pengaturan',
         parentNavigatorKey: rootKey,
         builder: (_, _) => const SettingsScreen(),
+        routes: [
+          GoRoute(path: 'username', parentNavigatorKey: rootKey, builder: (_, _) => const UsernameScreen()),
+        ],
       ),
       GoRoute(path: '/hari/:date', parentNavigatorKey: rootKey, builder: (_, s) => DayListScreen(date: s.pathParameters['date']!)),
       GoRoute(path: '/barang/:month', parentNavigatorKey: rootKey, builder: (_, s) => BarangScreen(month: s.pathParameters['month']!)),
