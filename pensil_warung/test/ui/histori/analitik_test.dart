@@ -110,6 +110,8 @@ void main() {
       await pump(tester, days: 3, month: _month(changePct: null, top: [_top(1, 'Nasi goreng', 3, 45000)], through: 3));
       expect(find.text('Laporan lengkap sedang disiapkan'), findsOneWidget);
       expect(find.text('3 dari 14 hari · 11 hari lagi'), findsOneWidget);
+      expect(find.text('Butuh 14 hari jualan supaya polanya akurat'), findsOneWidget);
+      expect(find.text('641 transaksi · 3 hari tercatat'), findsOneWidget);
       expect(find.text('Akan muncul nanti'), findsOneWidget);
       expect(find.text('Mulai Desember'), findsOneWidget);
       expect(find.text('Setelah 7 hari'), findsOneWidget);

@@ -47,7 +47,7 @@ class _BodyState extends State<_Body> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const AppHeader(title: 'Histori'),
+          AppHeader(title: _tab == 1 && vm.summary != null && AnalitikView.isFull(vm) ? 'Laporan Analitik' : 'Histori'),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
             child: SegmentedTabs(labels: const ['Histori', 'Analitik'], selected: _tab, onChanged: (i) => setState(() => _tab = i)),

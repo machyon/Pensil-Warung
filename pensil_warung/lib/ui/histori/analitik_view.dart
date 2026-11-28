@@ -6,7 +6,6 @@ import '../../data/repositories/product_repository.dart';
 import '../../domain/analytics.dart';
 import '../core/format.dart';
 import '../core/theme.dart';
-import '../core/widgets/app_card.dart';
 import '../core/widgets/product_avatar.dart';
 import 'day_tile.dart';
 import 'histori_view_model.dart';
@@ -76,99 +75,50 @@ class AnalitikView extends StatelessWidget {
   const AnalitikView({super.key, required this.vm});
   final HistoriViewModel vm;
 
+  /// Under 14 days with sales the "belum cukup data" layout ([34]) shows instead of the full report.
+  static bool isFull(HistoriViewModel vm) => vm.days.length >= fullReportDays;
+
   @override
   Widget build(BuildContext context) {
     final s = vm.summary;
     if (s == null) return const Center(child: CircularProgressIndicator());
     final g = analitikGates(s, vm.days.length);
+    final full = isFull(vm);
     final shown = vm.showAll ? vm.days : vm.days.take(_firstDays).toList();
     return RefreshIndicator(
       onRefresh: vm.load,
       child: ListView(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
         children: [
-          Text('Laporan Analitik', style: appText(20, weight: FontWeight.w800)),
-          const SizedBox(height: 12),
-          _SummaryCard(vm: vm, s: s),
-          const SizedBox(height: 12),
-          _TrendCard(vm: vm, s: s),
-          if (vm.days.length < fullReportDays) ...[const SizedBox(height: 12), _ProgressCard(days: vm.days.length)],
-          if (g.weekday) ...[
-            const SizedBox(height: 12),
-            _WeekdayCard(s: s, avg: s.weekdayAvg!),
+          if (full) _HeroCard(vm: vm, s: s) else _PlainSummary(s: s, days: vm.days.length),
+          if (!full) ...[const SizedBox(height: 12), _ProgressCard(days: vm.days.length)],
+          if (g.weekday) ...[_h2('Hari paling ramai'), _WeekdayCard(s: s, avg: s.weekdayAvg!)],
+          if (g.top) ...[_h2('Barang terlaris'), _TopItemsCard(s: s)],
+          if (!g.weekday || !g.top || !g.comparison) ...[
+            const SizedBox(height: 16),
+            Padding(padding: const EdgeInsets.fromLTRB(8, 0, 8, 8), child: Text('Akan muncul nanti', style: appText(13, weight: FontWeight.w600, color: AppColors.muted))),
+            _LaterList(s: s, g: g),
           ],
-          if (g.top) ...[
-            const SizedBox(height: 12),
-            _TopItemsCard(s: s),
+          if (full) ...[
+            _h2('Per hari'),
+            for (final d in shown) ...[DayTile(vm: vm, d: d), const SizedBox(height: 8)],
+            if (!vm.showAll && vm.days.length > _firstDays)
+              TextButton(onPressed: vm.expandList, child: Text('Lihat semua ${vm.days.length} hari', style: appText(15, weight: FontWeight.w700))),
           ],
-          if (!g.weekday || !g.top || !g.comparison) ...[const SizedBox(height: 12), _LaterCard(s: s, g: g)],
-          const SizedBox(height: 16),
-          Text('Per hari', style: appText(18, weight: FontWeight.w800)),
-          const SizedBox(height: 8),
-          for (final d in shown) ...[
-            DayTile(vm: vm, d: d),
-            const SizedBox(height: 8),
-          ],
-          if (!vm.showAll && vm.days.length > _firstDays)
-            TextButton(
-              onPressed: vm.expandList,
-              child: Text(
-                'Lihat semua ${vm.days.length} hari',
-                style: appText(15, weight: FontWeight.w700),
-              ),
-            ),
         ],
       ),
     );
   }
 }
 
-class _SummaryCard extends StatelessWidget {
-  const _SummaryCard({required this.vm, required this.s});
-  final HistoriViewModel vm;
-  final MonthSummary s;
+Widget _h2(String t) => Padding(padding: const EdgeInsets.fromLTRB(4, 24, 4, 12), child: Text(t, style: appText(17, weight: FontWeight.w800)));
 
-  @override
-  Widget build(BuildContext context) {
-    final mon = monthNames[int.parse(s.month.substring(5, 7)) - 1];
-    final pct = s.previous.changePct;
-    return AppCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            s.month == HistoriViewModel.currentMonth
-                ? 'Penjualan bulan ini'
-                : 'Penjualan $mon',
-            style: appText(14, weight: FontWeight.w600, color: AppColors.muted),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            rupiah(s.revenue),
-            style: appText(30, weight: FontWeight.w800, letterSpacing: -0.5),
-          ),
-          Text(
-            comparisonLine(s),
-            style: appText(
-              14,
-              weight: FontWeight.w600,
-              color: pct == null
-                  ? AppColors.muted
-                  : pct < 0
-                  ? AppColors.error
-                  : AppColors.label,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
+BoxDecoration _card([double radius = 24]) => BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(radius), border: Border.all(color: AppColors.border));
 
-/// 12 bars, the viewed month in accent; a tap switches the month (not before the first sale).
-class _TrendCard extends StatelessWidget {
-  const _TrendCard({required this.vm, required this.s});
+/// Yellow summary with the 12-month trend inside; a tap on a bar switches the month (not before the first sale).
+class _HeroCard extends StatelessWidget {
+  const _HeroCard({required this.vm, required this.s});
   final HistoriViewModel vm;
   final MonthSummary s;
 
@@ -176,93 +126,83 @@ class _TrendCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final max = s.trend.fold<int>(0, (m, t) => t.revenue > m ? t.revenue : m);
     final first = monthIndex(vm.firstMonth);
-    return AppCard(
-      padding: const EdgeInsets.fromLTRB(8, 16, 8, 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.only(left: 8),
-            child: Text(
-              'Penjualan 12 bulan',
-              style: appText(
-                14,
-                weight: FontWeight.w700,
-                color: AppColors.muted,
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          SizedBox(
-            height: 150,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                for (final t in s.trend)
-                  Expanded(
-                    child: Semantics(
-                      button: true,
-                      label:
-                          '${monthNames[int.parse(t.month.substring(5, 7)) - 1]}, ${rupiah(t.revenue)}',
-                      child: InkWell(
-                        onTap: monthIndex(t.month) < first
-                            ? null
-                            : () => vm.setMonth(t.month),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.end,
-                          children: [
-                            SizedBox(
-                              height: 14,
-                              child: FittedBox(
-                                fit: BoxFit.scaleDown,
-                                child: Text(
-                                  t.revenue == 0
-                                      ? ''
-                                      : rupiahCompact(t.revenue),
-                                  style: appText(
-                                    9,
-                                    weight: FontWeight.w700,
-                                    color: AppColors.label,
-                                  ),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Container(
-                              height: max == 0
-                                  ? 3
-                                  : 3 + 100.0 * t.revenue / max,
-                              margin: const EdgeInsets.symmetric(horizontal: 2),
-                              decoration: BoxDecoration(
-                                color: t.month == s.month
-                                    ? AppColors.accent
-                                    : AppColors.chip,
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                            ),
-                            const SizedBox(height: 6),
-                            Text(
-                              monthShort(t.month),
-                              style: appText(
-                                10,
-                                weight: t.month == s.month
-                                    ? FontWeight.w800
-                                    : FontWeight.w600,
-                                color: t.month == s.month
-                                    ? AppColors.ink
-                                    : AppColors.muted,
-                              ),
-                            ),
-                          ],
+    return Container(
+      padding: const EdgeInsets.fromLTRB(22, 20, 22, 20),
+      decoration: BoxDecoration(color: AppColors.accent, borderRadius: BorderRadius.circular(28)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(monthYear(int.parse(s.month.substring(0, 4)), int.parse(s.month.substring(5, 7))), style: appText(14, weight: FontWeight.w700, color: AppColors.onAccent)),
+        Text(rupiah(s.revenue), style: appText(40, weight: FontWeight.w800, letterSpacing: -1, color: AppColors.onAccent)),
+        Text(comparisonLine(s), style: appText(14, weight: FontWeight.w600, color: AppColors.onAccent)),
+        const SizedBox(height: 14),
+        SizedBox(
+          height: 84,
+          child: Row(children: [
+            for (final t in s.trend)
+              Expanded(
+                child: Semantics(
+                  button: true,
+                  selected: t.month == s.month,
+                  label: '${monthNames[int.parse(t.month.substring(5, 7)) - 1]}, ${rupiah(t.revenue)}',
+                  child: InkWell(
+                    onTap: monthIndex(t.month) < first ? null : () => vm.setMonth(t.month),
+                    child: Column(mainAxisAlignment: MainAxisAlignment.end, children: [
+                      SizedBox(
+                        height: 14,
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text(t.revenue == 0 ? '' : rupiahCompact(t.revenue), style: appText(11, weight: t.month == s.month ? FontWeight.w800 : FontWeight.w600, color: AppColors.onAccent)),
                         ),
                       ),
-                    ),
+                      const SizedBox(height: 4),
+                      Container(
+                        height: max == 0 ? 3 : 3 + 37.0 * t.revenue / max,
+                        margin: const EdgeInsets.symmetric(horizontal: 2),
+                        decoration: BoxDecoration(
+                          color: t.month == s.month ? AppColors.onAccent : const Color(0xFFAA8417),
+                          borderRadius: const BorderRadius.vertical(top: Radius.circular(6), bottom: Radius.circular(2)),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Container(
+                        height: 18,
+                        padding: const EdgeInsets.symmetric(horizontal: 3),
+                        alignment: Alignment.center,
+                        decoration: t.month == s.month ? BoxDecoration(color: AppColors.onAccent, borderRadius: BorderRadius.circular(6)) : null,
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text(monthShort(t.month), style: appText(12, weight: t.month == s.month ? FontWeight.w800 : FontWeight.w600, color: t.month == s.month ? AppColors.accent : AppColors.onAccent)),
+                        ),
+                      ),
+                    ]),
                   ),
-              ],
-            ),
-          ),
-        ],
-      ),
+                ),
+              ),
+          ]),
+        ),
+      ]),
+    );
+  }
+}
+
+/// [34] white summary: "N transaksi · N hari tercatat".
+class _PlainSummary extends StatelessWidget {
+  const _PlainSummary({required this.s, required this.days});
+  final MonthSummary s;
+  final int days;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: _card(),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(monthYear(int.parse(s.month.substring(0, 4)), int.parse(s.month.substring(5, 7))), style: appText(13, weight: FontWeight.w600, color: AppColors.muted)),
+        const SizedBox(height: 2),
+        Text(rupiah(s.revenue), style: appText(30, weight: FontWeight.w800, letterSpacing: -0.6)),
+        const SizedBox(height: 2),
+        Text('${s.count} transaksi · $days hari tercatat', style: appText(13, color: AppColors.muted)),
+      ]),
     );
   }
 }
@@ -277,86 +217,54 @@ class _WeekdayCard extends StatelessWidget {
     final st = weekdayStats(avg);
     final max = avg[st.bestIndex];
     final mon = monthNames[int.parse(s.month.substring(5, 7)) - 1];
-    return AppCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Hari paling ramai',
-            style: appText(14, weight: FontWeight.w700, color: AppColors.muted),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            '${st.best} biasanya paling laris',
-            style: appText(18, weight: FontWeight.w800),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            'Rata-rata ${rupiah(st.mean)}. Paling sepi hari ${st.worst}, ${rupiah(st.worstValue)}.',
-            style: appText(14, color: AppColors.muted),
-          ),
-          const SizedBox(height: 12),
-          SizedBox(
-            height: 130,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                for (var i = 0; i < 7; i++)
-                  Expanded(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        SizedBox(
-                          height: 14,
-                          child: FittedBox(
-                            fit: BoxFit.scaleDown,
-                            child: Text(
-                              rupiahCompact(avg[i]),
-                              style: appText(
-                                10,
-                                weight: FontWeight.w700,
-                                color: AppColors.label,
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Container(
-                          height: max == 0 ? 3 : 3 + 80.0 * avg[i] / max,
-                          margin: const EdgeInsets.symmetric(horizontal: 4),
-                          decoration: BoxDecoration(
-                            color: i == st.bestIndex
-                                ? AppColors.accent
-                                : AppColors.chip,
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          dayNames[i].substring(0, 3),
-                          style: appText(
-                            11,
-                            weight: i == st.bestIndex
-                                ? FontWeight.w800
-                                : FontWeight.w600,
-                            color: AppColors.muted,
-                          ),
-                        ),
-                      ],
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: _card(),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('${st.best} biasanya paling laris', style: appText(16, weight: FontWeight.w800)),
+        const SizedBox(height: 4),
+        Text('Rata-rata ${rupiah(st.mean)}. Paling sepi hari ${st.worst}, ${rupiah(st.worstValue)}.', style: appText(14, color: AppColors.label).copyWith(height: 20 / 14)),
+        const SizedBox(height: 12),
+        SizedBox(
+          height: 118,
+          child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+            for (var i = 0; i < 7; i++) ...[
+              if (i > 0) const SizedBox(width: 8),
+              Expanded(
+                child: Column(mainAxisAlignment: MainAxisAlignment.end, children: [
+                  FittedBox(fit: BoxFit.scaleDown, child: Text(rupiahCompact(avg[i]), style: appText(12, weight: i == st.bestIndex ? FontWeight.w800 : FontWeight.w600, color: i == st.bestIndex ? AppColors.ink : AppColors.muted))),
+                  const SizedBox(height: 4),
+                  Container(
+                    height: max == 0 ? 3 : 3 + 69.0 * avg[i] / max,
+                    decoration: BoxDecoration(
+                      color: i == st.bestIndex ? AppColors.accent : AppColors.fieldBorder,
+                      borderRadius: const BorderRadius.vertical(top: Radius.circular(8), bottom: Radius.circular(3)),
                     ),
                   ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            'Rata-rata dari ${s.throughDay} hari di $mon. Hari dihitung dalam WIB.',
-            style: appText(12, color: AppColors.faint),
-          ),
-        ],
-      ),
+                  const SizedBox(height: 4),
+                  Text(dayNames[i].substring(0, 3), style: appText(13, weight: i == st.bestIndex ? FontWeight.w800 : FontWeight.w600)),
+                ]),
+              ),
+            ],
+          ]),
+        ),
+        const SizedBox(height: 12),
+        Text('Rata-rata dari ${s.throughDay} hari di $mon. Hari dihitung dalam WIB.', style: appText(13, color: AppColors.muted)),
+      ]),
     );
   }
+}
+
+class _StokPill extends StatelessWidget {
+  const _StokPill(this.stock);
+  final int stock;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(color: AppColors.chip, borderRadius: BorderRadius.circular(12)),
+        child: Text('Stok $stock', style: appText(13, weight: FontWeight.w700, color: AppColors.label)),
+      );
 }
 
 class _TopItemsCard extends StatelessWidget {
@@ -367,68 +275,47 @@ class _TopItemsCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final products = context.watch<ProductRepository>().items;
     final top = s.topItems.take(3).toList();
-    return AppCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Barang terlaris',
-            style: appText(14, weight: FontWeight.w700, color: AppColors.muted),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            topItemsSentence(s.topItems, s.revenue),
-            style: appText(15, weight: FontWeight.w700),
-          ),
-          for (final i in top)
-            Padding(
-              padding: const EdgeInsets.only(top: 12),
-              child: Row(
-                children: [
-                  ProductAvatar(
-                    name: i.name,
-                    size: 44,
-                    photoUrl: i.productId == null
-                        ? null
-                        : products
-                              .where((p) => p.id == i.productId)
-                              .firstOrNull
-                              ?.photoUrl,
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          i.name,
-                          style: appText(15, weight: FontWeight.w700),
-                        ),
-                        Text(
-                          '${i.qty} terjual · ${rupiah(i.revenue)}',
-                          style: appText(13, color: AppColors.muted),
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (i.stock != null)
-                    Text(
-                      'Stok ${i.stock}',
-                      style: appText(
-                        13,
-                        weight: FontWeight.w600,
-                        color: AppColors.muted,
-                      ),
-                    ),
-                ],
+    return Container(
+      decoration: _card(),
+      clipBehavior: Clip.antiAlias,
+      child: Column(children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Padding(padding: EdgeInsets.only(top: 1), child: Icon(Icons.info_outline_rounded, size: 18, color: AppColors.label)),
+            const SizedBox(width: 8),
+            Expanded(child: Text(topItemsSentence(s.topItems, s.revenue), style: appText(14, color: AppColors.label).copyWith(height: 20 / 14))),
+          ]),
+        ),
+        for (final i in top)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: const BoxDecoration(border: Border(top: BorderSide(color: AppColors.border))),
+            child: Row(children: [
+              ProductAvatar(name: i.name, size: 44, photoUrl: i.productId == null ? null : products.where((p) => p.id == i.productId).firstOrNull?.photoUrl),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(i.name, style: appText(15, weight: FontWeight.w700)),
+                  Text('${i.qty} terjual · ${rupiah(i.revenue)}', style: appText(13, color: AppColors.muted)),
+                ]),
               ),
-            ),
-          TextButton(
-            onPressed: () => context.push('/barang/${s.month}'),
-            child: Text('Lihat semua barang', style: appText(15, weight: FontWeight.w700)),
+              if (i.stock != null) _StokPill(i.stock!),
+            ]),
           ),
-        ],
-      ),
+        InkWell(
+          onTap: () => context.push('/barang/${s.month}'),
+          child: Container(
+            height: 48,
+            padding: const EdgeInsets.fromLTRB(16, 0, 12, 0),
+            decoration: const BoxDecoration(border: Border(top: BorderSide(color: AppColors.border))),
+            child: Row(children: [
+              Expanded(child: Text('Lihat semua barang', style: appText(15, weight: FontWeight.w700))),
+              const Icon(Icons.chevron_right_rounded, size: 20, color: AppColors.muted),
+            ]),
+          ),
+        ),
+      ]),
     );
   }
 }
@@ -440,51 +327,89 @@ class _ProgressCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AppCard(
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: _card(),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text('Laporan lengkap sedang disiapkan', style: appText(16, weight: FontWeight.w800)),
-        const SizedBox(height: 4),
-        Text('Catat jualan beberapa hari lagi, lalu analisisnya muncul di sini.', style: appText(14, color: AppColors.muted)),
+        Row(children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(color: AppColors.chip, borderRadius: BorderRadius.circular(14)),
+            child: const Icon(Icons.bar_chart_rounded, size: 22),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Laporan lengkap sedang disiapkan', style: appText(17, weight: FontWeight.w800)),
+              const SizedBox(height: 2),
+              Text('Butuh $fullReportDays hari jualan supaya polanya akurat', style: appText(13, color: AppColors.muted)),
+            ]),
+          ),
+        ]),
         const SizedBox(height: 12),
         ClipRRect(
-          borderRadius: BorderRadius.circular(6),
-          child: LinearProgressIndicator(value: days / fullReportDays, minHeight: 10, backgroundColor: AppColors.chip, color: AppColors.accent),
+          borderRadius: BorderRadius.circular(5),
+          child: LinearProgressIndicator(value: (days / fullReportDays).clamp(0, 1), minHeight: 10, backgroundColor: AppColors.chip, color: AppColors.accent),
         ),
-        const SizedBox(height: 8),
-        Text('$days dari $fullReportDays hari · ${fullReportDays - days} hari lagi', style: appText(13, weight: FontWeight.w700, color: AppColors.label)),
+        const SizedBox(height: 6),
+        Text('$days dari $fullReportDays hari · ${fullReportDays - days} hari lagi', style: appText(13, weight: FontWeight.w700)),
       ]),
     );
   }
 }
 
 /// "Akan muncul nanti": the sections whose gate has not passed.
-class _LaterCard extends StatelessWidget {
-  const _LaterCard({required this.s, required this.g});
+class _LaterList extends StatelessWidget {
+  const _LaterList({required this.s, required this.g});
   final MonthSummary s;
   final ({bool weekday, bool top, bool comparison}) g;
 
   @override
   Widget build(BuildContext context) {
     final next = monthNames[int.parse(s.month.substring(5, 7)) % 12];
-    final rows = [
-      if (!g.weekday) ('Hari paling ramai', 'Setelah $fullReportDays hari'),
-      if (!g.comparison) ('Dibanding bulan lalu', 'Mulai $next'),
-      if (!g.top) ('Barang terlaris', 'Setelah $topItemsDays hari'),
+    final rows = <(Widget, String, String)>[
+      if (!g.weekday) (const _MiniBars(), 'Hari paling ramai', 'Setelah $fullReportDays hari'),
+      if (!g.comparison) (const Icon(Icons.trending_up_rounded, size: 24, color: AppColors.faint), 'Dibanding bulan lalu', 'Mulai $next'),
+      if (!g.top) (const Icon(Icons.star_outline_rounded, size: 24, color: AppColors.faint), 'Barang terlaris', 'Setelah $topItemsDays hari'),
     ];
-    return AppCard(
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text('Akan muncul nanti', style: appText(14, weight: FontWeight.w700, color: AppColors.muted)),
-        for (final r in rows)
-          Padding(
-            padding: const EdgeInsets.only(top: 10),
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      decoration: _card(),
+      child: Column(children: [
+        for (var i = 0; i < rows.length; i++)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: i == 0 ? null : const BoxDecoration(border: Border(top: BorderSide(color: AppColors.border))),
             child: Row(children: [
-              const Icon(Icons.lock_outline, size: 18, color: AppColors.faint),
-              const SizedBox(width: 10),
-              Expanded(child: Text(r.$1, style: appText(15, weight: FontWeight.w700))),
-              Text(r.$2, style: appText(13, color: AppColors.muted)),
+              SizedBox(width: 44, height: 32, child: Center(child: rows[i].$1)),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(rows[i].$2, style: appText(15, weight: FontWeight.w700)),
+                  const SizedBox(height: 2),
+                  Text(rows[i].$3, style: appText(13, color: AppColors.muted)),
+                ]),
+              ),
             ]),
           ),
       ]),
     );
   }
+}
+
+class _MiniBars extends StatelessWidget {
+  const _MiniBars();
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+        width: 44,
+        height: 32,
+        child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+          for (final h in const [0.4, 0.7, 0.55, 1.0]) ...[
+            Expanded(child: FractionallySizedBox(heightFactor: h, child: DecoratedBox(decoration: BoxDecoration(color: AppColors.disabled, borderRadius: BorderRadius.circular(3))))),
+            if (h != 1.0) const SizedBox(width: 3),
+          ],
+        ]),
+      );
 }
