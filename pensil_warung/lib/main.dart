@@ -18,6 +18,7 @@ import 'data/session.dart';
 import 'routing/router.dart';
 import 'ui/core/theme.dart';
 import 'ui/notifications/notification_feed.dart';
+import 'ui/settings/display_settings.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -40,6 +41,7 @@ class MyApp extends StatefulWidget {
 }
 
 class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
+  late final _display = DisplaySettings(widget.prefs);
   late final _router = buildRouter(widget.session);
   late final _products = ProductRepository(widget.api);
   late final _transactions = TransactionRepository(widget.api, _products);
@@ -74,6 +76,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     widget.session.removeListener(_onSession);
     _feed.dispose();
+    _display.dispose();
     _catat.dispose();
     _router.dispose();
     super.dispose();
@@ -92,12 +95,17 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         Provider(create: (_) => AnalyticsRepository(widget.api)),
         ChangeNotifierProvider.value(value: _catat),
         ChangeNotifierProvider.value(value: _feed),
+        ChangeNotifierProvider.value(value: _display),
         Provider(create: (_) => CatatRepository(widget.api, _products)),
       ],
       child: MaterialApp.router(
         title: 'Pensil Warung',
         theme: buildTheme(),
         routerConfig: _router,
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(context).copyWith(textScaler: context.watch<DisplaySettings>().textScaler),
+          child: child!,
+        ),
       ),
     );
   }

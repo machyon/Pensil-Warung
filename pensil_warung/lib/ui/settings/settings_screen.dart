@@ -5,6 +5,8 @@ import 'package:provider/provider.dart';
 import '../../data/repositories/account_repository.dart';
 import '../../data/session.dart';
 import '../core/theme.dart';
+import '../core/widgets/segmented_tabs.dart';
+import 'display_settings.dart';
 import 'settings_widgets.dart';
 
 /// [10] Pengaturan. Opened from the avatar of any header.
@@ -31,6 +33,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget build(BuildContext context) {
     final user = context.watch<Session>().user;
     if (user == null) return const SizedBox.shrink();
+    final display = context.watch<DisplaySettings>();
     return SettingsPage(
       title: 'Pengaturan',
       titleSize: 30,
@@ -78,7 +81,45 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 value: '••••••••',
                 onTap: () => context.push('/pengaturan/sandi')),
         ]),
+        SettingsSection(title: 'Tampilan', children: [
+          _Choice(
+              icon: Icons.contrast_rounded,
+              label: 'Tema',
+              labels: DisplaySettings.temaLabels,
+              selected: display.tema,
+              onChanged: display.setTema),
+          _Choice(
+              icon: Icons.text_fields_rounded,
+              label: 'Ukuran tulisan',
+              labels: DisplaySettings.textSizeLabels,
+              selected: display.textSize,
+              onChanged: display.setTextSize),
+        ]),
       ],
     );
   }
+}
+
+class _Choice extends StatelessWidget {
+  const _Choice({required this.icon, required this.label, required this.labels, required this.selected, required this.onChanged});
+
+  final IconData icon;
+  final String label;
+  final List<String> labels;
+  final int selected;
+  final ValueChanged<int> onChanged;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(children: [
+          Row(children: [
+            RowIcon(icon),
+            const SizedBox(width: 14),
+            Expanded(child: Text(label, style: appText(16, weight: FontWeight.w700))),
+          ]),
+          const SizedBox(height: 12),
+          SegmentedTabs(labels: labels, selected: selected, onChanged: onChanged, yellow: true),
+        ]),
+      );
 }
