@@ -9,6 +9,7 @@ import '../core/widgets/app_header.dart';
 import '../core/widgets/empty_state.dart';
 import '../core/widgets/product_avatar.dart';
 import 'product_list_view_model.dart';
+import '../notifications/notification_feed.dart';
 
 class ProductListScreen extends StatelessWidget {
   const ProductListScreen({super.key});
@@ -152,7 +153,7 @@ class _BodyState extends State<_Body> {
         children: [
           Column(
             children: [
-              const AppHeader(title: 'Produk'),
+              AppHeader(title: 'Produk', hasUnread: context.select<NotificationFeed, bool>((f) => f.hasUnread), onBell: () => context.push('/notifikasi')),
               if (vm.loaded && (vm.total > 0))
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),

@@ -20,6 +20,7 @@ import '../../catat/result.dart';
 import 'catat_view_model.dart';
 import 'offline_screen.dart';
 import 'saved_card.dart';
+import '../notifications/notification_feed.dart';
 
 class CatatScreen extends StatefulWidget {
   const CatatScreen({super.key});
@@ -109,7 +110,7 @@ class _CatatScreenState extends State<CatatScreen> {
     return SafeArea(
       child: Column(
         children: [
-          AppHeader(title: 'Catat', subtitle: wibDateShort(DateTime.now()), avatarLetter: name.isEmpty ? '?' : name[0]),
+          AppHeader(title: 'Catat', subtitle: wibDateShort(DateTime.now()), avatarLetter: name.isEmpty ? '?' : name[0], hasUnread: context.select<NotificationFeed, bool>((f) => f.hasUnread), onBell: () => context.push('/notifikasi')),
           Expanded(
             child: ListView(
               controller: null,

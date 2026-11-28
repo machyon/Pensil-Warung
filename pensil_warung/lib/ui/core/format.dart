@@ -65,6 +65,14 @@ String wibRelative(DateTime t, {DateTime? now}) {
   return '${dayNames[w.weekday - 1].substring(0, 3)}, ${w.day} ${monthNames[w.month - 1].substring(0, 3)}, $time';
 }
 
+/// `Baru saja`, `5 menit lalu`, then [wibRelative]. [now] is for tests.
+String timeAgo(DateTime t, {DateTime? now}) {
+  final mins = (now ?? DateTime.now()).difference(t).inMinutes;
+  if (mins < 1) return 'Baru saja';
+  if (mins < 60) return '$mins menit lalu';
+  return wibRelative(t, now: now);
+}
+
 /// `15000` -> `15.000`, the Rp field's text.
 String groupedDigits(int n) => _grouped.format(n);
 

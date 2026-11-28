@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
+import '../../support/feed.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:material_ui/material_ui.dart';
@@ -140,8 +141,9 @@ void main() {
         });
       }),
     ));
-    await tester.pumpWidget(ChangeNotifierProvider.value(
-      value: repo,
+    final feed = await testFeed();
+    await tester.pumpWidget(MultiProvider(
+      providers: [ChangeNotifierProvider.value(value: repo), ChangeNotifierProvider.value(value: feed)],
       child: const MaterialApp(home: Scaffold(body: ProductListScreen())),
     ));
     await tester.pumpAndSettle();
@@ -165,8 +167,9 @@ void main() {
       baseUrl: 'http://x',
       client: MockClient((_) async => _json(200, {'items': [], 'count': 0})),
     ));
-    await tester.pumpWidget(ChangeNotifierProvider.value(
-      value: repo,
+    final feed = await testFeed();
+    await tester.pumpWidget(MultiProvider(
+      providers: [ChangeNotifierProvider.value(value: repo), ChangeNotifierProvider.value(value: feed)],
       child: const MaterialApp(home: Scaffold(body: ProductListScreen())),
     ));
     await tester.pumpAndSettle();
