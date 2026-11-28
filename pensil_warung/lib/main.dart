@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'config.dart';
 import 'data/api_client.dart';
 import 'data/repositories/auth_repository.dart';
+import 'data/repositories/product_repository.dart';
 import 'data/session.dart';
 import 'routing/router.dart';
 import 'ui/core/theme.dart';
@@ -28,9 +29,21 @@ class MyApp extends StatefulWidget {
 
 class _MyAppState extends State<MyApp> {
   late final _router = buildRouter(widget.session);
+  late final _products = ProductRepository(widget.api);
+
+  void _onSession() {
+    if (!widget.session.signedIn) _products.clear();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    widget.session.addListener(_onSession);
+  }
 
   @override
   void dispose() {
+    widget.session.removeListener(_onSession);
     _router.dispose();
     super.dispose();
   }
@@ -42,6 +55,7 @@ class _MyAppState extends State<MyApp> {
         ChangeNotifierProvider.value(value: widget.session),
         Provider.value(value: widget.api),
         Provider(create: (_) => AuthRepository(widget.api)),
+        ChangeNotifierProvider.value(value: _products),
       ],
       child: MaterialApp.router(
         title: 'Pensil Warung',

@@ -48,3 +48,16 @@ String wibIsoDate(DateTime t) {
 
 /// `November 2026`
 String monthYear(int year, int month) => '${monthNames[month - 1]} $year';
+
+/// `Hari ini, 14.32`, `Kemarin, 21.40`, `Sen, 16 Nov, 08.00` (WIB). [now] is for tests.
+String wibRelative(DateTime t, {DateTime? now}) {
+  final w = wib(t), n = wib(now ?? DateTime.now());
+  final days = DateTime.utc(n.year, n.month, n.day).difference(DateTime.utc(w.year, w.month, w.day)).inDays;
+  final time = wibTime(t);
+  if (days == 0) return 'Hari ini, $time';
+  if (days == 1) return 'Kemarin, $time';
+  return '${dayNames[w.weekday - 1].substring(0, 3)}, ${w.day} ${monthNames[w.month - 1].substring(0, 3)}, $time';
+}
+
+/// `15000` -> `15.000`, the Rp field's text.
+String groupedDigits(int n) => _grouped.format(n);
