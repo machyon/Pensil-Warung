@@ -58,7 +58,7 @@ class LineResult {
 class LintResult {
   LintResult._(this.lines)
       : ops = [for (final l in lines) if (l.op != null && l.status != LineStatus.error) l.op!],
-        total = lines.where((l) => l.kind == LineKind.sale).fold(0, (s, l) => s + (l.lineTotal ?? 0)),
+        total = lines.where((l) => l.kind == LineKind.sale && l.status != LineStatus.error).fold(0, (s, l) => s + (l.lineTotal ?? 0)),
         saleCount = lines.where((l) => l.op?.op == 'sale').length,
         portionCount = lines.where((l) => l.op?.op == 'sale').fold(0, (s, l) => s + (l.quantity ?? 0)),
         errors = lines.where((l) => l.status == LineStatus.error).length,
