@@ -10,6 +10,7 @@ import '../ui/auth/login_screen.dart';
 import '../ui/auth/register_screen.dart';
 import '../ui/landing/landing_screen.dart';
 import '../ui/catat/catat_screen.dart';
+import '../ui/histori/barang_screen.dart';
 import '../ui/histori/day_list_screen.dart';
 import '../ui/histori/detail_screen.dart';
 import '../ui/histori/edit_screen.dart';
@@ -22,7 +23,7 @@ const _userTabs = ['/produk', '/catat', '/histori'];
 const _broadcasterTabs = ['/siaran', '/tulis', '/akun'];
 
 /// Full-screen history screens, pushed over any tab (Catat links to a Detail too).
-const _userExtras = ['/hari', '/transaksi'];
+const _userExtras = ['/hari', '/transaksi', '/barang'];
 
 const _publicPaths = ['/welcome', '/masuk', '/daftar'];
 
@@ -80,6 +81,7 @@ GoRouter buildRouter(Session session, {String initialLocation = '/'}) {
       GoRoute(path: '/masuk', builder: (_, _) => const LoginScreen()),
       GoRoute(path: '/daftar', builder: (_, _) => const RegisterScreen()),
       GoRoute(path: '/hari/:date', parentNavigatorKey: rootKey, builder: (_, s) => DayListScreen(date: s.pathParameters['date']!)),
+      GoRoute(path: '/barang/:month', parentNavigatorKey: rootKey, builder: (_, s) => BarangScreen(month: s.pathParameters['month']!)),
       GoRoute(
         path: '/transaksi/:id',
         parentNavigatorKey: rootKey,

@@ -1,3 +1,4 @@
+import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 
@@ -219,7 +220,7 @@ class _TrendCard extends StatelessWidget {
                                       ? ''
                                       : rupiahCompact(t.revenue),
                                   style: appText(
-                                    10,
+                                    9,
                                     weight: FontWeight.w700,
                                     color: AppColors.label,
                                   ),
@@ -422,6 +423,10 @@ class _TopItemsCard extends StatelessWidget {
                 ],
               ),
             ),
+          TextButton(
+            onPressed: () => context.push('/barang/${s.month}'),
+            child: Text('Lihat semua barang', style: appText(15, weight: FontWeight.w700)),
+          ),
         ],
       ),
     );
