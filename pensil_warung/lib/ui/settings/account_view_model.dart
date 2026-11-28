@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import '../../data/api_exception.dart';
 import '../../data/repositories/account_repository.dart';
 import '../../data/session.dart';
+import 'google_reauth.dart';
 
 /// Shared state of the account forms: one request at a time, errors mapped for the screen.
 abstract class FormModel extends ChangeNotifier {
@@ -149,6 +150,69 @@ class PasswordViewModel extends FormModel {
         newError = e.message;
       default:
         return false;
+    }
+    return true;
+  }
+}
+
+/// Hapus akun: a password, or (Google-only) a fresh Google `id_token`. `204` signs out.
+class DeleteViewModel extends FormModel {
+  DeleteViewModel(this._repo, this._session, this._google, {required this.hasPassword});
+
+  final AccountRepository _repo;
+  final Session _session;
+  final GoogleReauth _google;
+  final bool hasPassword;
+
+  bool understood = false;
+  String? passwordError;
+  String? _idToken;
+
+  bool get signedInAgain => _idToken != null;
+
+  void setUnderstood(bool v) {
+    understood = v;
+    notifyListeners();
+  }
+
+  void edited() {
+    if (passwordError == null && error == null) return;
+    passwordError = error = null;
+    notifyListeners();
+  }
+
+  /// "Masuk ulang dengan Google": keep the token for [delete].
+  Future<void> reauth() async {
+    if (running) return;
+    running = true;
+    error = null;
+    notifyListeners();
+    try {
+      _idToken = await _google.idToken();
+    } catch (_) {
+      error = 'Gagal masuk dengan Google. Coba lagi.';
+    } finally {
+      running = false;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> delete(String password) => run(() async {
+        passwordError = null;
+        await _repo.deleteAccount(password: hasPassword ? password : null, idToken: hasPassword ? null : _idToken);
+        await _google.signOut();
+        await _session.signOut(); // the router leaves for Landing
+      });
+
+  @override
+  bool onApi(ApiException e) {
+    if (e.code == 'invalid_credentials') {
+      passwordError = 'Kata sandi salah';
+    } else if (e.code == 'reauth_required') {
+      _idToken = null;
+      error = 'Masuk ulang dengan Google dulu.';
+    } else {
+      return false;
     }
     return true;
   }

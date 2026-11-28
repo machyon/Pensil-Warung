@@ -18,6 +18,7 @@ import '../ui/histori/histori_screen.dart';
 import '../ui/notifications/notifikasi_screen.dart';
 import '../ui/products/product_list_screen.dart';
 import '../ui/settings/about_screen.dart';
+import '../ui/settings/delete_account_screen.dart';
 import '../ui/settings/email_screen.dart';
 import '../ui/settings/legal_screen.dart';
 import '../ui/settings/legal_text.dart';
@@ -125,6 +126,7 @@ GoRouter buildRouter(Session session, {String initialLocation = '/'}) {
           GoRoute(path: 'username', parentNavigatorKey: rootKey, builder: (_, _) => const UsernameScreen()),
           GoRoute(path: 'email', parentNavigatorKey: rootKey, builder: (_, _) => const EmailScreen()),
           GoRoute(path: 'sandi', parentNavigatorKey: rootKey, builder: (_, _) => const PasswordScreen()),
+          GoRoute(path: 'hapus', parentNavigatorKey: rootKey, builder: (_, _) => const DeleteAccountScreen()),
           GoRoute(path: 'tentang', parentNavigatorKey: rootKey, builder: (_, _) => const AboutScreen()),
           GoRoute(
               path: 'syarat',

@@ -113,6 +113,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           border: true,
           onTap: () => _confirmSignOut(context),
         ),
+        _Tile(height: 48, label: 'Hapus akun', icon: Icons.delete_outline_rounded, onTap: () => context.push('/pengaturan/hapus')),
       ],
     );
   }
