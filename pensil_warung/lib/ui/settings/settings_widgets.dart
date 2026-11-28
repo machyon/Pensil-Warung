@@ -47,9 +47,9 @@ class SettingsPage extends StatelessWidget {
 
 /// "Akun" style group: small caps title above a card of rows.
 class SettingsSection extends StatelessWidget {
-  const SettingsSection({super.key, required this.title, required this.children});
+  const SettingsSection({super.key, this.title, required this.children});
 
-  final String title;
+  final String? title;
   final List<Widget> children;
 
   @override
@@ -57,11 +57,13 @@ class SettingsSection extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          child: Text(title.toUpperCase(), style: appText(13, weight: FontWeight.w700, color: AppColors.muted, letterSpacing: 0.4)),
-        ),
-        const SizedBox(height: 8),
+        if (title != null) ...[
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: Text(title!.toUpperCase(), style: appText(13, weight: FontWeight.w700, color: AppColors.muted, letterSpacing: 0.4)),
+          ),
+          const SizedBox(height: 8),
+        ],
         AppCard(
           padding: EdgeInsets.zero,
           child: Column(children: [
@@ -92,9 +94,9 @@ class RowIcon extends StatelessWidget {
 
 /// Icon, label, optional value, chevron when [onTap] is set.
 class SettingsRow extends StatelessWidget {
-  const SettingsRow({super.key, required this.icon, required this.label, this.value, this.onTap});
+  const SettingsRow({super.key, this.icon, required this.label, this.value, this.onTap});
 
-  final IconData icon;
+  final IconData? icon;
   final String label;
   final String? value;
   final VoidCallback? onTap;
@@ -108,8 +110,7 @@ class SettingsRow extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           child: Row(children: [
-            RowIcon(icon),
-            const SizedBox(width: 14),
+            if (icon != null) ...[RowIcon(icon!), const SizedBox(width: 14)],
             Expanded(child: Text(label, style: appText(16, weight: FontWeight.w700))),
             if (value != null) ...[
               const SizedBox(width: 8),

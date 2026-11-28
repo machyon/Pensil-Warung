@@ -18,14 +18,16 @@ class GoogleSignInModel extends ChangeNotifier {
   String? error;
   static Future<void>? _init;
 
+  static Future<void> ensureInitialized() =>
+      _init ??= GoogleSignIn.instance.initialize(serverClientId: googleServerClientId);
+
   Future<void> signInWithGoogle() async {
     if (running) return;
     running = true;
     error = null;
     notifyListeners();
     try {
-      _init ??= GoogleSignIn.instance.initialize(serverClientId: googleServerClientId);
-      await _init;
+      await ensureInitialized();
       final account = await GoogleSignIn.instance.authenticate();
       final idToken = account.authentication.idToken;
       if (idToken == null) throw StateError('no id_token');

@@ -19,6 +19,7 @@ import 'routing/router.dart';
 import 'ui/core/theme.dart';
 import 'ui/notifications/notification_feed.dart';
 import 'ui/settings/display_settings.dart';
+import 'ui/settings/google_reauth.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -90,6 +91,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         Provider.value(value: widget.api),
         Provider(create: (_) => AuthRepository(widget.api)),
         Provider(create: (_) => AccountRepository(widget.api)),
+        Provider(create: (_) => const GoogleReauth()),
         ChangeNotifierProvider.value(value: _products),
         ChangeNotifierProvider.value(value: _transactions),
         Provider(create: (_) => AnalyticsRepository(widget.api)),
