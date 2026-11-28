@@ -65,7 +65,7 @@ class _LabeledFieldState extends State<LabeledField> {
               filled: true,
               fillColor: AppColors.surface,
               contentPadding: const EdgeInsets.symmetric(horizontal: 16),
-              enabledBorder: _border(hasError ? AppColors.error : AppColors.fieldBorder),
+              enabledBorder: hasError ? _border(AppColors.error, 2) : _border(AppColors.fieldBorder),
               focusedBorder: _border(hasError ? AppColors.error : AppColors.ink, 2),
               suffixIcon: widget.password
                   ? IconButton(
@@ -81,7 +81,10 @@ class _LabeledFieldState extends State<LabeledField> {
         if (note != null)
           Padding(
             padding: const EdgeInsets.only(top: 6),
-            child: Text(note, style: appText(13, color: hasError ? AppColors.error : AppColors.muted)),
+            child: Text(note,
+                style: hasError
+                    ? appText(14, weight: FontWeight.w700, color: AppColors.error)
+                    : appText(13, color: AppColors.muted)),
           ),
       ],
     );

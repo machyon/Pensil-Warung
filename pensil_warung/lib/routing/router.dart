@@ -5,11 +5,14 @@ import '../data/session.dart';
 import '../domain/user.dart';
 import '../ui/core/widgets/main_nav.dart';
 import '../ui/core/widgets/placeholder_tab.dart';
+import '../ui/auth/login_screen.dart';
 import '../ui/landing/landing_screen.dart';
 import '../ui/splash/splash_gate.dart';
 
 const _userTabs = ['/produk', '/catat', '/histori'];
 const _broadcasterTabs = ['/siaran', '/tulis', '/akun'];
+
+const _publicPaths = ['/welcome', '/masuk', '/daftar'];
 
 /// Where a signed-in user lands; Landing without one.
 String homePath(User? user) => user == null
@@ -21,7 +24,7 @@ String homePath(User? user) => user == null
 /// Pure redirect rule, split out so it can be tested.
 String? redirectFor(User? user, String path) {
   if (path == '/') return null; // SplashGate routes itself once it has loaded the session
-  if (user == null) return path == '/welcome' ? null : '/welcome';
+  if (user == null) return _publicPaths.contains(path) ? null : '/welcome';
   final tabs = user.isBroadcaster ? _broadcasterTabs : _userTabs;
   return tabs.any(path.startsWith) ? null : homePath(user);
 }
@@ -53,6 +56,7 @@ GoRouter buildRouter(Session session, {String initialLocation = '/'}) {
     routes: [
       GoRoute(path: '/', builder: (_, _) => const SplashGate()),
       GoRoute(path: '/welcome', builder: (_, _) => const LandingScreen()),
+      GoRoute(path: '/masuk', builder: (_, _) => const LoginScreen()),
       shell(_userTabs, ['Produk', 'Catat', 'Histori'], userNavItems),
       shell(_broadcasterTabs, ['Siaran', 'Tulis', 'Akun'], broadcasterNavItems),
     ],
