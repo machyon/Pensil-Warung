@@ -65,7 +65,7 @@ void main() {
       child: MaterialApp.router(routerConfig: router),
     ));
     await tester.pumpAndSettle();
-    expect(find.text('Masuk dengan Google'), findsOneWidget);
+    expect(find.text('Mulai sekarang'), findsOneWidget);
     expect(find.byType(MainNav), findsNothing);
   });
 }

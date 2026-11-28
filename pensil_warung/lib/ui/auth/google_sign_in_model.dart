@@ -8,8 +8,8 @@ import '../../data/api_exception.dart';
 import '../../data/repositories/auth_repository.dart';
 import '../../data/session.dart';
 
-class LandingViewModel extends ChangeNotifier {
-  LandingViewModel(this._auth, this._session);
+class GoogleSignInModel extends ChangeNotifier {
+  GoogleSignInModel(this._auth, this._session);
 
   final AuthRepository _auth;
   final Session _session;
