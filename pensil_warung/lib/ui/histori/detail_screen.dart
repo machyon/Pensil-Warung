@@ -12,7 +12,9 @@ import '../core/widgets/app_card.dart';
 import '../core/widgets/app_header.dart';
 import '../core/widgets/error_view.dart';
 import '../core/widgets/product_avatar.dart';
+import '../core/widgets/buttons.dart';
 import 'detail_view_model.dart';
+import 'void_sheet.dart';
 
 /// [15] `TransaksiDetail`.
 class DetailScreen extends StatelessWidget {
@@ -47,11 +49,25 @@ class _Body extends StatelessWidget {
                       : const Center(child: CircularProgressIndicator())
                   : _Content(tx: tx),
             ),
+            if (tx != null && !tx.voided)
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: const BoxDecoration(color: AppColors.surface, border: Border(top: BorderSide(color: AppColors.border))),
+                child: SecondaryButton(label: 'Batalkan', onPressed: () => _void(context, tx)),
+              ),
           ],
         ),
       ),
     );
   }
+}
+
+Future<void> _void(BuildContext context, Transaction tx) async {
+  final vm = context.read<DetailViewModel>();
+  final r = await showVoidSheet(context, context.read<TransactionRepository>(), tx);
+  if (!context.mounted) return;
+  if (r == VoidResult.voided) context.pop(); // back to the list, which reloads itself
+  if (r == VoidResult.alreadyVoided) vm.load();
 }
 
 class _Content extends StatelessWidget {
