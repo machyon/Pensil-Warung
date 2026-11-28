@@ -50,7 +50,7 @@ class _CatatScreenState extends State<CatatScreen> {
     if (!mounted) return;
     if (out == SaveOutcome.offline) {
       // Same text, so Coba lagi reuses the same client_uuid.
-      out = await Navigator.of(context).push<SaveOutcome>(
+      out = await Navigator.of(context, rootNavigator: true).push<SaveOutcome>(
               MaterialPageRoute(builder: (_) => OfflineScreen(retry: vm.save))) ??
           SaveOutcome.offline;
       if (!mounted) return;
@@ -68,6 +68,7 @@ class _CatatScreenState extends State<CatatScreen> {
   }
 
   void _afterSave(ScaffoldMessengerState messenger, CatatViewModel vm) {
+    FocusManager.instance.primaryFocus?.unfocus(); // the box got focus back when the sheet closed
     messenger.hideCurrentSnackBar();
     final s = vm.saved;
     if (s == null) {
