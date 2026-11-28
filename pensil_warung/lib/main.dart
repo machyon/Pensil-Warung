@@ -11,6 +11,7 @@ import 'data/repositories/auth_repository.dart';
 import 'data/repositories/broadcast_repository.dart';
 import 'data/repositories/broadcaster_repository.dart';
 import 'data/repositories/catat_repository.dart';
+import 'ui/broadcaster/broadcast_draft.dart';
 import 'ui/broadcaster/siaran_view_model.dart';
 import 'ui/catat/catat_view_model.dart';
 import 'data/repositories/analytics_repository.dart';
@@ -50,6 +51,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   late final _transactions = TransactionRepository(widget.api, _products);
   late final _feed = NotificationFeed(BroadcastRepository(widget.api), widget.prefs);
   late final _siaran = SiaranViewModel(BroadcasterRepository(widget.api));
+  late final _draft = BroadcastDraft(BroadcasterRepository(widget.api), _siaran);
   late final _catat = CatatViewModel(CatatRepository(widget.api, _products), _products, _transactions);
 
   void _onSession() {
@@ -58,6 +60,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       _catat.clear();
       _feed.clear();
       _siaran.clear();
+      _draft.reset();
     } else if (!_feed.loaded) {
       _feed.load();
     }
@@ -85,6 +88,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     widget.session.removeListener(_onSession);
     _feed.dispose();
     _siaran.dispose();
+    _draft.dispose();
     _display.dispose();
     _catat.dispose();
     _router.dispose();
@@ -106,6 +110,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         ChangeNotifierProvider.value(value: _catat),
         ChangeNotifierProvider.value(value: _feed),
         ChangeNotifierProvider.value(value: _siaran),
+        ChangeNotifierProvider.value(value: _draft),
         ChangeNotifierProvider.value(value: _display),
         Provider(create: (_) => CatatRepository(widget.api, _products)),
       ],
