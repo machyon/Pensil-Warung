@@ -11,6 +11,8 @@ import '../core/theme.dart';
 import '../core/widgets/app_card.dart';
 import '../core/widgets/buttons.dart';
 import '../core/widgets/labeled_field.dart';
+import '../core/widgets/product_avatar.dart';
+import '../photos/photo_flow.dart';
 import 'product_edit_view_model.dart';
 
 class ProductEditScreen extends StatelessWidget {
@@ -84,6 +86,19 @@ class _BodyState extends State<_Body> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
+                      Row(children: [
+                        ProductAvatar(name: widget.product.name, photoUrl: vm.photoUrl, size: 64),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: SecondaryButton(
+                            label: vm.photoUrl == null ? 'Tambah foto' : 'Ganti foto',
+                            onPressed: () async {
+                              if (await changeProductPhoto(context, widget.product)) vm.refreshPhoto();
+                            },
+                          ),
+                        ),
+                      ]),
+                      const SizedBox(height: 16),
                       LabeledField(
                         label: 'Nama barang',
                         controller: _name,

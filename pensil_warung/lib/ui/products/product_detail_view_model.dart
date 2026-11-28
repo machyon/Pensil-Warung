@@ -55,6 +55,38 @@ class ProductDetailViewModel extends ChangeNotifier {
     } catch (_) {}
   }
 
+  /// Fresh product only (after a photo change).
+  Future<void> refreshProduct() async {
+    try {
+      product = await _repo.get(id);
+      notifyListeners();
+    } catch (_) {}
+  }
+
+  bool _photoRetried = false;
+
+  /// The photo URL failed to load (expired): refresh the product once.
+  void photoFailed() {
+    if (_photoRetried) return;
+    _photoRetried = true;
+    refreshProduct();
+  }
+
+  bool get photoPending => _repo.pendingPhotos.containsKey(id);
+
+  bool retrying = false;
+
+  Future<void> retryPhoto() async {
+    final bytes = _repo.pendingPhotos[id];
+    if (bytes == null || retrying) return;
+    retrying = true;
+    notifyListeners();
+    await _repo.uploadPending(id, bytes);
+    retrying = false;
+    await refreshProduct();
+    notifyListeners();
+  }
+
   Future<void> loadMore() async {
     if (_next == null || loadingMore) return;
     loadingMore = true;

@@ -7,6 +7,7 @@ import '../../data/repositories/product_repository.dart';
 import '../core/money_input.dart';
 import '../core/theme.dart';
 import '../core/widgets/buttons.dart';
+import '../photos/photo_flow.dart';
 import 'bulk_add_view_model.dart';
 
 class BulkAddScreen extends StatelessWidget {
@@ -75,6 +76,7 @@ class _Body extends StatelessWidget {
                           Padding(
                             padding: const EdgeInsets.fromLTRB(0, 10, 0, 4),
                             child: Row(children: [
+                              const SizedBox(width: 50),
                               Expanded(child: _head('Barang')),
                               SizedBox(width: 108, child: _head('Harga')),
                               SizedBox(width: 56, child: _head('Stok')),
@@ -142,7 +144,13 @@ class _Body extends StatelessWidget {
                       onPressed: vm.readyCount == 0
                           ? null
                           : () async {
-                              if (await vm.save() && context.mounted) context.pop();
+                              final messenger = ScaffoldMessenger.of(context);
+                              if (!await vm.save() || !context.mounted) return;
+                              context.pop();
+                              if (vm.failedPhotos > 0) {
+                                messenger.showSnackBar(const SnackBar(
+                                    content: Text('Foto belum terunggah. Buka barangnya untuk coba lagi.')));
+                              }
                             },
                     ),
                   ),
@@ -196,6 +204,26 @@ class _RowView extends StatelessWidget {
         children: [
           Row(
             children: [
+              Semantics(
+                button: true,
+                label: row.photo == null ? 'Tambah foto ${row.name}' : 'Foto ${row.name}, ketuk untuk ganti',
+                child: GestureDetector(
+                  onTap: () async {
+                    final pick = await pickProductPhoto(context, name: row.name.isEmpty ? 'barang' : row.name, hasPhoto: row.photo != null);
+                    if (pick != null) vm.setPhoto(row, pick.bytes);
+                  },
+                  child: Container(
+                    width: 44,
+                    height: 44,
+                    margin: const EdgeInsets.only(right: 6),
+                    clipBehavior: Clip.antiAlias,
+                    decoration: BoxDecoration(color: AppColors.chip, borderRadius: BorderRadius.circular(12)),
+                    child: row.photo == null
+                        ? const Icon(Icons.add_a_photo_outlined, size: 20, color: AppColors.label)
+                        : Image.memory(row.photo!, fit: BoxFit.cover),
+                  ),
+                ),
+              ),
               Expanded(
                 child: _box(
                   error: row.nameError != null,

@@ -4,11 +4,14 @@ import '../theme.dart';
 
 /// Photo (URL as the API sends it) or up to two initials on `#EAE9E8`.
 class ProductAvatar extends StatelessWidget {
-  const ProductAvatar({super.key, required this.name, this.photoUrl, this.size = 48});
+  const ProductAvatar({super.key, required this.name, this.photoUrl, this.size = 48, this.onPhotoError});
 
   final String name;
   final String? photoUrl;
   final double size;
+
+  /// Called when the photo fails to load (an expired URL); the owner refreshes the product.
+  final VoidCallback? onPhotoError;
 
   String get _initials {
     final words = name.trim().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
@@ -28,7 +31,10 @@ class ProductAvatar extends StatelessWidget {
         color: AppColors.chip,
         child: photoUrl == null
             ? fallback
-            : Image.network(photoUrl!, fit: BoxFit.cover, errorBuilder: (_, _, _) => fallback),
+            : Image.network(photoUrl!, fit: BoxFit.cover, errorBuilder: (_, _, _) {
+                  if (onPhotoError != null) WidgetsBinding.instance.addPostFrameCallback((_) => onPhotoError!());
+                  return fallback;
+                }),
       ),
     );
   }

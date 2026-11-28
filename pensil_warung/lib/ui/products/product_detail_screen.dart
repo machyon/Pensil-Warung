@@ -9,6 +9,7 @@ import '../core/theme.dart';
 import '../core/widgets/app_header.dart';
 import '../core/widgets/error_view.dart';
 import '../core/widgets/product_avatar.dart';
+import '../photos/photo_flow.dart';
 import 'product_actions.dart';
 import 'product_detail_view_model.dart';
 
@@ -71,7 +72,40 @@ class _BodyState extends State<_Body> {
                           padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
                           child: Row(
                             children: [
-                              ProductAvatar(name: p.name, photoUrl: p.photoUrl, size: 96),
+                              Semantics(
+                                button: true,
+                                label: p.photoUrl == null ? 'Tambah foto ${p.name}' : 'Ganti foto ${p.name}',
+                                child: GestureDetector(
+                                  onTap: () async {
+                                    if (await changeProductPhoto(context, p)) vm.refreshProduct();
+                                  },
+                                  child: Stack(
+                                    clipBehavior: Clip.none,
+                                    children: [
+                                      ProductAvatar(
+                                        name: p.name,
+                                        photoUrl: p.photoUrl,
+                                        size: 96,
+                                        onPhotoError: vm.photoFailed,
+                                      ),
+                                      Positioned(
+                                        right: -4,
+                                        bottom: -4,
+                                        child: Container(
+                                          width: 32,
+                                          height: 32,
+                                          decoration: BoxDecoration(
+                                            color: AppColors.accent,
+                                            shape: BoxShape.circle,
+                                            border: Border.all(color: AppColors.paper, width: 2),
+                                          ),
+                                          child: const Icon(Icons.photo_camera_outlined, size: 18, color: AppColors.onAccent),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
                               const SizedBox(width: 16),
                               Expanded(
                                 child: Column(
@@ -85,6 +119,22 @@ class _BodyState extends State<_Body> {
                             ],
                           ),
                         ),
+                        if (vm.photoPending)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 10),
+                            child: Container(
+                              padding: const EdgeInsets.fromLTRB(14, 6, 6, 6),
+                              decoration: BoxDecoration(color: AppColors.errorBg, borderRadius: BorderRadius.circular(16)),
+                              child: Row(children: [
+                                Expanded(child: Text('Foto belum terunggah', style: appText(14, weight: FontWeight.w700, color: AppColors.error))),
+                                TextButton(
+                                  onPressed: vm.retrying ? null : vm.retryPhoto,
+                                  child: Text(vm.retrying ? 'Mengunggah...' : 'Coba lagi',
+                                      style: appText(14, weight: FontWeight.w800, color: AppColors.error)),
+                                ),
+                              ]),
+                            ),
+                          ),
                         Row(children: [
                           Expanded(child: _Stat('Stok sekarang', '${p.stock}')),
                           const SizedBox(width: 10),

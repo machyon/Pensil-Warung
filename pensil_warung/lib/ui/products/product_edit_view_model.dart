@@ -13,6 +13,15 @@ class ProductEditViewModel extends ChangeNotifier {
 
   bool running = false;
   String? nameError;
+  late String? photoUrl = product.photoUrl;
+
+  Future<void> refreshPhoto() async {
+    try {
+      photoUrl = (await _repo.get(product.id)).photoUrl;
+      notifyListeners();
+    } catch (_) {}
+  }
+
   String? error;
 
   String name = '';

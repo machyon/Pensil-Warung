@@ -64,11 +64,56 @@ class ProductRepository extends ChangeNotifier {
     ];
   }
 
-  Future<void> bulkAdd(List<({String name, int price, int stock})> rows) async {
-    await _api.post('/api/v1/products/bulk', body: {
+  /// Returns the new products in request order.
+  Future<List<Product>> bulkAdd(List<({String name, int price, int stock})> rows) async {
+    final j = await _api.post('/api/v1/products/bulk', body: {
       'items': [for (final r in rows) {'name': r.name, 'price': r.price, 'stock': r.stock}],
-    });
+    }) as Map<String, dynamic>;
     await _refresh();
+    return [for (final p in j['items'] as List) Product.fromJson(p as Map<String, dynamic>)];
+  }
+
+  /// Photos picked for a product that did not exist yet and failed to upload,
+  /// kept so Detail can offer "Coba lagi".
+  final pendingPhotos = <int, Uint8List>{};
+  final _photoRetried = <int>{};
+
+  Future<Product> uploadPhoto(int id, Uint8List bytes) async {
+    final p = Product.fromJson(await _api.multipart(
+      '/api/v1/products/$id/photo',
+      field: 'photo',
+      bytes: bytes,
+      filename: 'photo.jpg',
+      method: 'PUT',
+    ) as Map<String, dynamic>);
+    pendingPhotos.remove(id);
+    _photoRetried.remove(id);
+    items = [for (final x in items) x.id == id ? p : x];
+    notifyListeners();
+    return p;
+  }
+
+  Future<void> deletePhoto(int id) async {
+    await _api.delete('/api/v1/products/$id/photo');
+    await _refresh();
+  }
+
+  /// Upload a photo chosen before the product was saved. On failure the bytes
+  /// stay in [pendingPhotos] and this returns false.
+  Future<bool> uploadPending(int id, Uint8List bytes) async {
+    try {
+      await uploadPhoto(id, bytes);
+      return true;
+    } catch (_) {
+      pendingPhotos[id] = bytes;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Presigned photo URLs expire: refresh the list once per product when one fails to load.
+  void photoFailed(int id) {
+    if (_photoRetried.add(id)) _refresh();
   }
 
   /// Only the fields passed are sent.
