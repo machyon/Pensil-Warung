@@ -7,6 +7,7 @@ import '../domain/user.dart';
 import '../ui/core/widgets/main_nav.dart';
 import '../ui/core/widgets/placeholder_tab.dart';
 import '../ui/auth/login_screen.dart';
+import '../ui/broadcaster/siaran_screen.dart';
 import '../ui/auth/register_screen.dart';
 import '../ui/landing/landing_screen.dart';
 import '../ui/catat/catat_screen.dart';
@@ -160,7 +161,7 @@ GoRouter buildRouter(Session session, {String initialLocation = '/'}) {
         screens: {0: const ProductListScreen(), 1: const CatatScreen(), 2: const HistoriScreen()},
         subRoutes: {0: productRoutes},
       ),
-      shell(_broadcasterTabs, ['Siaran', 'Tulis', 'Akun'], broadcasterNavItems),
+      shell(_broadcasterTabs, ['Siaran', 'Tulis', 'Akun'], broadcasterNavItems, screens: {0: const SiaranScreen()}),
     ],
   );
 }

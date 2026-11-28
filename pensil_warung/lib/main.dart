@@ -9,7 +9,9 @@ import 'data/prefs.dart';
 import 'data/repositories/account_repository.dart';
 import 'data/repositories/auth_repository.dart';
 import 'data/repositories/broadcast_repository.dart';
+import 'data/repositories/broadcaster_repository.dart';
 import 'data/repositories/catat_repository.dart';
+import 'ui/broadcaster/siaran_view_model.dart';
 import 'ui/catat/catat_view_model.dart';
 import 'data/repositories/analytics_repository.dart';
 import 'data/repositories/product_repository.dart';
@@ -47,6 +49,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   late final _products = ProductRepository(widget.api);
   late final _transactions = TransactionRepository(widget.api, _products);
   late final _feed = NotificationFeed(BroadcastRepository(widget.api), widget.prefs);
+  late final _siaran = SiaranViewModel(BroadcasterRepository(widget.api));
   late final _catat = CatatViewModel(CatatRepository(widget.api, _products), _products, _transactions);
 
   void _onSession() {
@@ -54,8 +57,12 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       _products.clear();
       _catat.clear();
       _feed.clear();
+      _siaran.clear();
     } else if (!_feed.loaded) {
       _feed.load();
+    }
+    if (widget.session.user?.isBroadcaster ?? false) {
+      if (!_siaran.loaded) _siaran.load();
     }
   }
 
@@ -77,6 +84,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     widget.session.removeListener(_onSession);
     _feed.dispose();
+    _siaran.dispose();
     _display.dispose();
     _catat.dispose();
     _router.dispose();
@@ -97,6 +105,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         Provider(create: (_) => AnalyticsRepository(widget.api)),
         ChangeNotifierProvider.value(value: _catat),
         ChangeNotifierProvider.value(value: _feed),
+        ChangeNotifierProvider.value(value: _siaran),
         ChangeNotifierProvider.value(value: _display),
         Provider(create: (_) => CatatRepository(widget.api, _products)),
       ],

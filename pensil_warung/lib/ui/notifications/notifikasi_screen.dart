@@ -7,6 +7,7 @@ import '../core/theme.dart';
 import '../core/widgets/app_card.dart';
 import '../core/widgets/app_header.dart';
 import '../core/widgets/app_sheet.dart';
+import '../core/widgets/category_icon.dart';
 import '../core/widgets/empty_state.dart';
 import '../core/widgets/error_view.dart';
 import 'notification_feed.dart';
@@ -147,13 +148,6 @@ class _Filter extends StatelessWidget {
       );
 }
 
-IconData _icon(String category) => switch (category) {
-      'update' => Icons.system_update_alt_rounded,
-      'berita' => Icons.campaign_outlined,
-      'tips' => Icons.lightbulb_outline_rounded,
-      _ => Icons.info_outline_rounded,
-    };
-
 class _Row extends StatelessWidget {
   const _Row({required this.b, required this.unread, required this.onTap});
 
@@ -167,12 +161,7 @@ class _Row extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(color: AppColors.chip, borderRadius: BorderRadius.circular(14)),
-                child: Icon(_icon(b.category), size: 22, color: AppColors.label),
-              ),
+              CategoryBadge(b.category),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
