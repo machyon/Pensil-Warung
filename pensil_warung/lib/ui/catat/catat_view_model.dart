@@ -10,6 +10,8 @@ import '../../catat/summary.dart';
 import '../../data/api_exception.dart';
 import '../../data/repositories/catat_repository.dart';
 import '../../data/repositories/product_repository.dart';
+import '../../data/repositories/transaction_repository.dart';
+import '../../domain/transaction.dart';
 import 'catat_editor.dart';
 
 enum SaveOutcome { saved, linesInvalid, offline, failed }
@@ -25,7 +27,7 @@ class SavedCard {
 
 /// State of the Catat tab. App-wide, so the text survives tab switches.
 class CatatViewModel extends ChangeNotifier {
-  CatatViewModel(this._repo, this._products, {this._debounce = const Duration(milliseconds: 150)})
+  CatatViewModel(this._repo, this._products, this._tx, {this._debounce = const Duration(milliseconds: 150)})
       {
     controller.addListener(_onText);
     _products.addListener(_relint);
@@ -34,6 +36,7 @@ class CatatViewModel extends ChangeNotifier {
 
   final CatatRepository _repo;
   final ProductRepository _products;
+  final TransactionRepository _tx;
   final Duration _debounce;
   final controller = CatatController();
   final scroll = ScrollController();
@@ -124,6 +127,7 @@ class CatatViewModel extends ChangeNotifier {
     try {
       final res = await _repo.save(clientUuid: _uuid!, rawText: text, ops: r.ops);
       _uuid = null;
+      _tx.markChanged();
       final tx = res.transaction;
       final creates = {for (final l in r.lines) if (l.op?.op == 'create_product') l.productName!.toLowerCase()};
       final toUpload = {
@@ -168,7 +172,7 @@ class CatatViewModel extends ChangeNotifier {
     final s = saved;
     if (s == null) return;
     try {
-      final d = await _repo.today();
+      final d = await _tx.today();
       if (identical(saved, s)) {
         saved = SavedCard(tx: s.tx, rawText: s.rawText, undoable: s.undoable, today: d);
         notifyListeners();
@@ -181,7 +185,7 @@ class CatatViewModel extends ChangeNotifier {
     final s = saved;
     if (s == null || !s.undoable) return null;
     try {
-      await _repo.voidTransaction(s.tx.id);
+      await _tx.voidTransaction(s.tx.id);
     } catch (e) {
       return messageOf(e);
     }

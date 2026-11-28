@@ -5,6 +5,7 @@ import 'package:pensil_warung/data/api_client.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:pensil_warung/data/repositories/catat_repository.dart';
+import 'package:pensil_warung/data/repositories/transaction_repository.dart';
 import 'package:pensil_warung/data/repositories/product_repository.dart';
 import 'package:pensil_warung/ui/catat/catat_view_model.dart';
 import 'package:pensil_warung/data/repositories/auth_repository.dart';
@@ -52,7 +53,7 @@ void main() {
     final api = ApiClient(
         baseUrl: 'http://x', client: MockClient((_) async => http.Response('{"items":[]}', 200)));
     final products = ProductRepository(api);
-    final catat = CatatViewModel(CatatRepository(api, products), products);
+    final catat = CatatViewModel(CatatRepository(api, products), products, TransactionRepository(api, products));
     await tester.pumpWidget(MultiProvider(
       providers: [
         ChangeNotifierProvider.value(value: session),

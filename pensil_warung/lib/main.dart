@@ -6,7 +6,9 @@ import 'data/api_client.dart';
 import 'data/repositories/auth_repository.dart';
 import 'data/repositories/catat_repository.dart';
 import 'ui/catat/catat_view_model.dart';
+import 'data/repositories/analytics_repository.dart';
 import 'data/repositories/product_repository.dart';
+import 'data/repositories/transaction_repository.dart';
 import 'data/session.dart';
 import 'routing/router.dart';
 import 'ui/core/theme.dart';
@@ -32,7 +34,8 @@ class MyApp extends StatefulWidget {
 class _MyAppState extends State<MyApp> {
   late final _router = buildRouter(widget.session);
   late final _products = ProductRepository(widget.api);
-  late final _catat = CatatViewModel(CatatRepository(widget.api, _products), _products);
+  late final _transactions = TransactionRepository(widget.api, _products);
+  late final _catat = CatatViewModel(CatatRepository(widget.api, _products), _products, _transactions);
 
   void _onSession() {
     if (!widget.session.signedIn) {
@@ -63,6 +66,8 @@ class _MyAppState extends State<MyApp> {
         Provider.value(value: widget.api),
         Provider(create: (_) => AuthRepository(widget.api)),
         ChangeNotifierProvider.value(value: _products),
+        ChangeNotifierProvider.value(value: _transactions),
+        Provider(create: (_) => AnalyticsRepository(widget.api)),
         ChangeNotifierProvider.value(value: _catat),
         Provider(create: (_) => CatatRepository(widget.api, _products)),
       ],
