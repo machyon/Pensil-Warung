@@ -80,3 +80,76 @@ class UsernameViewModel extends FormModel {
     return true;
   }
 }
+
+/// Email and password changes both answer with a fresh token, which replaces the old one.
+class EmailViewModel extends FormModel {
+  EmailViewModel(this._repo, this._session);
+
+  final AccountRepository _repo;
+  final Session _session;
+
+  static final valid = RegExp(r'^\S+@\S+\.\S+$');
+
+  String? emailError;
+  String? passwordError;
+
+  void edited() {
+    if (emailError == null && passwordError == null && error == null) return;
+    emailError = passwordError = error = null;
+    notifyListeners();
+  }
+
+  Future<bool> save(String email, String password) => run(() async {
+        emailError = passwordError = null;
+        final r = await _repo.changeEmail(email, password);
+        await _session.replaceToken(r.token, r.user);
+      });
+
+  @override
+  bool onApi(ApiException e) {
+    switch (e.code) {
+      case 'invalid_credentials':
+        passwordError = 'Kata sandi salah';
+      case 'email_taken' || 'invalid_value':
+        emailError = e.message;
+      default:
+        return false;
+    }
+    return true;
+  }
+}
+
+class PasswordViewModel extends FormModel {
+  PasswordViewModel(this._repo, this._session);
+
+  final AccountRepository _repo;
+  final Session _session;
+
+  String? currentError;
+  String? newError;
+
+  void edited() {
+    if (currentError == null && newError == null && error == null) return;
+    currentError = newError = error = null;
+    notifyListeners();
+  }
+
+  Future<bool> save(String current, String next) => run(() async {
+        currentError = newError = null;
+        final r = await _repo.changePassword(current, next);
+        await _session.replaceToken(r.token, r.user);
+      });
+
+  @override
+  bool onApi(ApiException e) {
+    switch (e.code) {
+      case 'invalid_credentials':
+        currentError = 'Kata sandi salah';
+      case 'invalid_value':
+        newError = e.message;
+      default:
+        return false;
+    }
+    return true;
+  }
+}

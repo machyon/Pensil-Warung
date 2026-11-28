@@ -17,6 +17,8 @@ import '../ui/histori/edit_screen.dart';
 import '../ui/histori/histori_screen.dart';
 import '../ui/notifications/notifikasi_screen.dart';
 import '../ui/products/product_list_screen.dart';
+import '../ui/settings/email_screen.dart';
+import '../ui/settings/password_screen.dart';
 import '../ui/settings/settings_screen.dart';
 import '../ui/settings/username_screen.dart';
 import '../ui/products/product_routes.dart';
@@ -118,6 +120,8 @@ GoRouter buildRouter(Session session, {String initialLocation = '/'}) {
         builder: (_, _) => const SettingsScreen(),
         routes: [
           GoRoute(path: 'username', parentNavigatorKey: rootKey, builder: (_, _) => const UsernameScreen()),
+          GoRoute(path: 'email', parentNavigatorKey: rootKey, builder: (_, _) => const EmailScreen()),
+          GoRoute(path: 'sandi', parentNavigatorKey: rootKey, builder: (_, _) => const PasswordScreen()),
         ],
       ),
       GoRoute(path: '/hari/:date', parentNavigatorKey: rootKey, builder: (_, s) => DayListScreen(date: s.pathParameters['date']!)),
