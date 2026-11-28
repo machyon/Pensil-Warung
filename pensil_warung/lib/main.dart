@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'config.dart';
 import 'data/api_client.dart';
 import 'data/prefs.dart';
+import 'data/repositories/account_repository.dart';
 import 'data/repositories/auth_repository.dart';
 import 'data/repositories/broadcast_repository.dart';
 import 'data/repositories/catat_repository.dart';
@@ -85,6 +86,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         ChangeNotifierProvider.value(value: widget.session),
         Provider.value(value: widget.api),
         Provider(create: (_) => AuthRepository(widget.api)),
+        Provider(create: (_) => AccountRepository(widget.api)),
         ChangeNotifierProvider.value(value: _products),
         ChangeNotifierProvider.value(value: _transactions),
         Provider(create: (_) => AnalyticsRepository(widget.api)),

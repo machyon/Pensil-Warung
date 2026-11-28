@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:pensil_warung/data/api_client.dart';
+import 'package:pensil_warung/data/session.dart';
 import 'package:pensil_warung/data/repositories/product_repository.dart';
 import 'package:pensil_warung/domain/product.dart';
 import 'package:pensil_warung/ui/core/format.dart';
@@ -143,7 +144,7 @@ void main() {
     ));
     final feed = await testFeed();
     await tester.pumpWidget(MultiProvider(
-      providers: [ChangeNotifierProvider.value(value: repo), ChangeNotifierProvider.value(value: feed)],
+      providers: [ChangeNotifierProvider.value(value: repo), ChangeNotifierProvider.value(value: feed), ChangeNotifierProvider(create: (_) => Session())],
       child: const MaterialApp(home: Scaffold(body: ProductListScreen())),
     ));
     await tester.pumpAndSettle();
@@ -169,7 +170,7 @@ void main() {
     ));
     final feed = await testFeed();
     await tester.pumpWidget(MultiProvider(
-      providers: [ChangeNotifierProvider.value(value: repo), ChangeNotifierProvider.value(value: feed)],
+      providers: [ChangeNotifierProvider.value(value: repo), ChangeNotifierProvider.value(value: feed), ChangeNotifierProvider(create: (_) => Session())],
       child: const MaterialApp(home: Scaffold(body: ProductListScreen())),
     ));
     await tester.pumpAndSettle();

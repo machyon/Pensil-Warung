@@ -5,6 +5,7 @@ import '../../domain/broadcast.dart';
 import '../core/format.dart';
 import '../core/theme.dart';
 import '../core/widgets/app_card.dart';
+import '../core/widgets/app_header.dart';
 import '../core/widgets/app_sheet.dart';
 import '../core/widgets/empty_state.dart';
 import '../core/widgets/error_view.dart';
@@ -97,12 +98,7 @@ class _Header extends StatelessWidget {
                 ],
               ),
             ),
-            Container(
-              width: 40,
-              height: 40,
-              decoration: const BoxDecoration(color: AppColors.accent, shape: BoxShape.circle),
-              child: const Icon(Icons.notifications_none_rounded, size: 20, color: AppColors.onAccent),
-            ),
+            const AvatarButton(),
           ],
         ),
       );

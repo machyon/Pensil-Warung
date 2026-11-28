@@ -17,6 +17,7 @@ import '../ui/histori/edit_screen.dart';
 import '../ui/histori/histori_screen.dart';
 import '../ui/notifications/notifikasi_screen.dart';
 import '../ui/products/product_list_screen.dart';
+import '../ui/settings/settings_screen.dart';
 import '../ui/products/product_routes.dart';
 import '../ui/splash/splash_gate.dart';
 
@@ -40,11 +41,38 @@ String? redirectFor(User? user, String path) {
   if (path == '/') return null; // SplashGate routes itself once it has loaded the session
   if (user == null) return _publicPaths.contains(path) ? null : '/welcome';
   final tabs = user.isBroadcaster ? _broadcasterTabs : _userTabs;
+  if (path.startsWith('/pengaturan')) return null; // both roles
   if (!user.isBroadcaster && _userExtras.any(path.startsWith)) return null;
   return tabs.any(path.startsWith) ? null : homePath(user);
 }
 
 final rootKey = GlobalKey<NavigatorState>();
+
+/// Tells the router only when the redirect could change (signed in or out, another role).
+/// A new username or token must not rebuild the pushed screens, or Pengaturan loses its state.
+class _AuthChanges extends ChangeNotifier {
+  _AuthChanges(this._session) : _last = _key(_session) {
+    _session.addListener(_onSession);
+  }
+
+  final Session _session;
+  String _last;
+
+  static String _key(Session s) => '${s.user?.id}/${s.user?.role}';
+
+  void _onSession() {
+    final now = _key(_session);
+    if (now == _last) return;
+    _last = now;
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _session.removeListener(_onSession);
+    super.dispose();
+  }
+}
 
 GoRouter buildRouter(Session session, {String initialLocation = '/'}) {
   StatefulShellRoute shell(List<String> tabs, List<String> titles, List<NavItem> items,
@@ -71,10 +99,11 @@ GoRouter buildRouter(Session session, {String initialLocation = '/'}) {
     );
   }
 
+  final auth = _AuthChanges(session);
   return GoRouter(
     navigatorKey: rootKey,
     initialLocation: initialLocation,
-    refreshListenable: session,
+    refreshListenable: auth,
     redirect: (context, state) => redirectFor(session.user, state.uri.path),
     routes: [
       GoRoute(path: '/', builder: (_, _) => const SplashGate()),
@@ -82,6 +111,11 @@ GoRouter buildRouter(Session session, {String initialLocation = '/'}) {
       GoRoute(path: '/masuk', builder: (_, _) => const LoginScreen()),
       GoRoute(path: '/daftar', builder: (_, _) => const RegisterScreen()),
       GoRoute(path: '/notifikasi', parentNavigatorKey: rootKey, builder: (_, _) => const NotifikasiScreen()),
+      GoRoute(
+        path: '/pengaturan',
+        parentNavigatorKey: rootKey,
+        builder: (_, _) => const SettingsScreen(),
+      ),
       GoRoute(path: '/hari/:date', parentNavigatorKey: rootKey, builder: (_, s) => DayListScreen(date: s.pathParameters['date']!)),
       GoRoute(path: '/barang/:month', parentNavigatorKey: rootKey, builder: (_, s) => BarangScreen(month: s.pathParameters['month']!)),
       GoRoute(
