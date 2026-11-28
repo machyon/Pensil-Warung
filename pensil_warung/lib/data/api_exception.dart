@@ -27,3 +27,6 @@ class NetworkException implements Exception {
   @override
   String toString() => 'NetworkException($cause)';
 }
+
+/// Text to show for a failed call: the server's Indonesian message, or a network line.
+String messageOf(Object e) => e is ApiException ? e.message : 'Tidak ada koneksi. Coba lagi.';

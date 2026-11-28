@@ -64,3 +64,9 @@ class SecondaryButton extends _AppButton {
           side: const BorderSide(color: AppColors.fieldBorder),
         );
 }
+
+/// Destructive confirm (Ya, hapus).
+class DangerButton extends _AppButton {
+  const DangerButton({super.key, required super.label, required super.onPressed, super.busy})
+      : super(fill: const Color(0xFFB3261E), fg: AppColors.surface);
+}

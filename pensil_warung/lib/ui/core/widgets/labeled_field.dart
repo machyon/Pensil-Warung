@@ -1,3 +1,4 @@
+import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../theme.dart';
@@ -15,6 +16,8 @@ class LabeledField extends StatefulWidget {
     this.onChanged,
     this.textInputAction,
     this.autofocus = false,
+    this.prefix,
+    this.inputFormatters,
   });
 
   final String label;
@@ -27,6 +30,10 @@ class LabeledField extends StatefulWidget {
   final ValueChanged<String>? onChanged;
   final TextInputAction? textInputAction;
   final bool autofocus;
+
+  /// Fixed text before the input, such as `Rp`.
+  final String? prefix;
+  final List<TextInputFormatter>? inputFormatters;
 
   @override
   State<LabeledField> createState() => _LabeledFieldState();
@@ -58,9 +65,19 @@ class _LabeledFieldState extends State<LabeledField> {
             keyboardType: widget.keyboardType,
             textInputAction: widget.textInputAction,
             onChanged: widget.onChanged,
+            inputFormatters: widget.inputFormatters,
             style: appText(16),
             decoration: InputDecoration(
               hintText: widget.hint,
+              prefixIcon: widget.prefix == null
+                  ? null
+                  : Padding(
+                      padding: const EdgeInsets.only(left: 16, right: 6),
+                      child: Center(
+                        widthFactor: 1,
+                        child: Text(widget.prefix!, style: appText(15, weight: FontWeight.w600, color: AppColors.muted)),
+                      ),
+                    ),
               hintStyle: appText(16, color: AppColors.faint),
               filled: true,
               fillColor: AppColors.surface,
