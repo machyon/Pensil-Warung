@@ -11,6 +11,7 @@ import 'catat_confirm.dart';
 import 'catat_editor.dart';
 import 'catat_results.dart';
 import 'catat_view_model.dart';
+import 'saved_card.dart';
 
 class CatatScreen extends StatefulWidget {
   const CatatScreen({super.key});
@@ -41,13 +42,39 @@ class _CatatScreenState extends State<CatatScreen> {
     if (!mounted) return;
     switch (out) {
       case SaveOutcome.saved:
-        break;
+        _afterSave(messenger, vm);
       case SaveOutcome.linesInvalid:
         messenger.showSnackBar(const SnackBar(content: Text('Ada baris yang perlu dibetulkan.')));
       case SaveOutcome.offline:
         messenger.showSnackBar(const SnackBar(content: Text('Tidak ada internet.')));
       case SaveOutcome.failed:
         if (vm.error != null) messenger.showSnackBar(SnackBar(content: Text(vm.error!)));
+    }
+  }
+
+  void _afterSave(ScaffoldMessengerState messenger, CatatViewModel vm) {
+    messenger.hideCurrentSnackBar();
+    final s = vm.saved;
+    if (s == null) {
+      messenger.showSnackBar(const SnackBar(content: Text('Tersimpan')));
+    } else if (s.undoable) {
+      messenger.showSnackBar(SnackBar(
+        content: Text('Tersimpan · ${rupiah(s.tx.total)}'),
+        duration: const Duration(seconds: 8),
+        action: SnackBarAction(
+          label: 'Urungkan',
+          onPressed: () async {
+            final err = await vm.undo();
+            if (err != null) messenger.showSnackBar(SnackBar(content: Text(err)));
+          },
+        ),
+      ));
+    } else {
+      messenger.showSnackBar(const SnackBar(content: Text('Tersimpan')));
+    }
+    if (vm.failedPhotos > 0) {
+      messenger.showSnackBar(SnackBar(
+          content: Text('${vm.failedPhotos} foto belum terunggah. Coba lagi dari halaman barangnya.')));
     }
   }
 
@@ -78,6 +105,10 @@ class _CatatScreenState extends State<CatatScreen> {
                   errorLines: vm.errorLines,
                   scroll: vm.scroll,
                 ),
+                if (vm.saved != null) ...[
+                  const SizedBox(height: 40),
+                  SavedCardView(saved: vm.saved!),
+                ],
                 if (vm.lint.lines.isNotEmpty) ...[
                   const SizedBox(height: 40),
                   ResultsCard(result: vm.lint, onFix: vm.applyFix, onGoToLine: _goToLine),
