@@ -7,6 +7,7 @@ import '../core/format.dart';
 import '../core/theme.dart';
 import '../core/widgets/app_header.dart';
 import '../core/widgets/buttons.dart';
+import 'catat_confirm.dart';
 import 'catat_editor.dart';
 import 'catat_results.dart';
 import 'catat_view_model.dart';
@@ -26,6 +27,28 @@ class _CatatScreenState extends State<CatatScreen> {
     super.initState();
     final products = context.read<ProductRepository>();
     if (!products.loaded) products.load().catchError((_) {});
+  }
+
+  Future<void> _save() async {
+    final vm = context.read<CatatViewModel>();
+    final messenger = ScaffoldMessenger.of(context);
+    FocusScope.of(context).unfocus();
+    if (vm.summary.needsConfirm &&
+        !await showConfirmSheet(context, vm.summary, lineCount: vm.lint.lines.length)) {
+      return;
+    }
+    final out = await vm.save();
+    if (!mounted) return;
+    switch (out) {
+      case SaveOutcome.saved:
+        break;
+      case SaveOutcome.linesInvalid:
+        messenger.showSnackBar(const SnackBar(content: Text('Ada baris yang perlu dibetulkan.')));
+      case SaveOutcome.offline:
+        messenger.showSnackBar(const SnackBar(content: Text('Tidak ada internet.')));
+      case SaveOutcome.failed:
+        if (vm.error != null) messenger.showSnackBar(SnackBar(content: Text(vm.error!)));
+    }
   }
 
   void _goToLine(int n) {
@@ -62,7 +85,7 @@ class _CatatScreenState extends State<CatatScreen> {
               ],
             ),
           ),
-          _Bar(vm: vm, onSave: () {}),
+          _Bar(vm: vm, onSave: _save),
         ],
       ),
     );
