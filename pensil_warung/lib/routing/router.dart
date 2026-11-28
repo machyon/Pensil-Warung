@@ -9,6 +9,7 @@ import '../ui/auth/login_screen.dart';
 import '../ui/auth/register_screen.dart';
 import '../ui/landing/landing_screen.dart';
 import '../ui/catat/catat_screen.dart';
+import '../ui/histori/histori_screen.dart';
 import '../ui/products/product_list_screen.dart';
 import '../ui/products/product_routes.dart';
 import '../ui/splash/splash_gate.dart';
@@ -74,7 +75,7 @@ GoRouter buildRouter(Session session, {String initialLocation = '/'}) {
         _userTabs,
         ['Produk', 'Catat', 'Histori'],
         userNavItems,
-        screens: {0: const ProductListScreen(), 1: const CatatScreen()},
+        screens: {0: const ProductListScreen(), 1: const CatatScreen(), 2: const HistoriScreen()},
         subRoutes: {0: productRoutes},
       ),
       shell(_broadcasterTabs, ['Siaran', 'Tulis', 'Akun'], broadcasterNavItems),
