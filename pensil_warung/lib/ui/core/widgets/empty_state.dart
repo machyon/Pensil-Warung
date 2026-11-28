@@ -11,6 +11,7 @@ class EmptyState extends StatelessWidget {
     this.text,
     this.actionLabel,
     this.onAction,
+    this.footer,
   });
 
   final IconData icon;
@@ -18,6 +19,7 @@ class EmptyState extends StatelessWidget {
   final String? text;
   final String? actionLabel;
   final VoidCallback? onAction;
+  final Widget? footer;
 
   @override
   Widget build(BuildContext context) {
@@ -43,6 +45,7 @@ class EmptyState extends StatelessWidget {
               const SizedBox(height: 24),
               SizedBox(width: 220, child: PrimaryButton(label: actionLabel!, onPressed: onAction)),
             ],
+            if (footer != null) ...[const SizedBox(height: 16), footer!],
           ],
         ),
       ),

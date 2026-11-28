@@ -8,6 +8,8 @@ import '../ui/core/widgets/placeholder_tab.dart';
 import '../ui/auth/login_screen.dart';
 import '../ui/auth/register_screen.dart';
 import '../ui/landing/landing_screen.dart';
+import '../ui/products/product_list_screen.dart';
+import '../ui/products/product_routes.dart';
 import '../ui/splash/splash_gate.dart';
 
 const _userTabs = ['/produk', '/catat', '/histori'];
@@ -30,8 +32,11 @@ String? redirectFor(User? user, String path) {
   return tabs.any(path.startsWith) ? null : homePath(user);
 }
 
+final rootKey = GlobalKey<NavigatorState>();
+
 GoRouter buildRouter(Session session, {String initialLocation = '/'}) {
-  StatefulShellRoute shell(List<String> tabs, List<String> titles, List<NavItem> items) {
+  StatefulShellRoute shell(List<String> tabs, List<String> titles, List<NavItem> items,
+      {Map<int, Widget> screens = const {}, Map<int, List<RouteBase>> subRoutes = const {}}) {
     return StatefulShellRoute.indexedStack(
       builder: (context, state, navigationShell) => Scaffold(
         body: navigationShell,
@@ -44,13 +49,18 @@ GoRouter buildRouter(Session session, {String initialLocation = '/'}) {
       branches: [
         for (var i = 0; i < tabs.length; i++)
           StatefulShellBranch(routes: [
-            GoRoute(path: tabs[i], builder: (_, _) => PlaceholderTab(titles[i])),
+            GoRoute(
+              path: tabs[i],
+              builder: (_, _) => screens[i] ?? PlaceholderTab(titles[i]),
+              routes: subRoutes[i] ?? const [],
+            ),
           ]),
       ],
     );
   }
 
   return GoRouter(
+    navigatorKey: rootKey,
     initialLocation: initialLocation,
     refreshListenable: session,
     redirect: (context, state) => redirectFor(session.user, state.uri.path),
@@ -59,7 +69,13 @@ GoRouter buildRouter(Session session, {String initialLocation = '/'}) {
       GoRoute(path: '/welcome', builder: (_, _) => const LandingScreen()),
       GoRoute(path: '/masuk', builder: (_, _) => const LoginScreen()),
       GoRoute(path: '/daftar', builder: (_, _) => const RegisterScreen()),
-      shell(_userTabs, ['Produk', 'Catat', 'Histori'], userNavItems),
+      shell(
+        _userTabs,
+        ['Produk', 'Catat', 'Histori'],
+        userNavItems,
+        screens: {0: const ProductListScreen()},
+        subRoutes: {0: productRoutes},
+      ),
       shell(_broadcasterTabs, ['Siaran', 'Tulis', 'Akun'], broadcasterNavItems),
     ],
   );
