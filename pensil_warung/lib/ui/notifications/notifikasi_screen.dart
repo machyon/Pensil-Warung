@@ -5,6 +5,7 @@ import '../../domain/broadcast.dart';
 import '../core/format.dart';
 import '../core/theme.dart';
 import '../core/widgets/app_card.dart';
+import '../core/widgets/app_sheet.dart';
 import '../core/widgets/empty_state.dart';
 import '../core/widgets/error_view.dart';
 import 'notification_feed.dart';
@@ -72,6 +73,7 @@ class _NotifikasiScreenState extends State<NotifikasiScreen> {
   void _open(Broadcast b) {
     final feed = context.read<NotificationFeed>();
     feed.markRead(b.id);
+    showAppSheet<void>(context, builder: (_) => _DetailBody(b: b, body: feed.body(b)));
   }
 }
 
@@ -202,5 +204,36 @@ class _Row extends StatelessWidget {
               ),
             ],
           ),
+      );
+}
+
+class _DetailBody extends StatelessWidget {
+  const _DetailBody({required this.b, required this.body});
+
+  final Broadcast b;
+  final Future<String?> body;
+
+  @override
+  Widget build(BuildContext context) => Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('${b.categoryLabel} · ${timeAgo(b.shownAt)}', style: appText(13, weight: FontWeight.w700, color: AppColors.muted)),
+          const SizedBox(height: 4),
+          Text(b.title, style: appText(20, weight: FontWeight.w800)),
+          const SizedBox(height: 8),
+          Text(b.summary, style: appText(15, color: AppColors.label)),
+          if (b.hasBody)
+            FutureBuilder<String?>(
+              future: body,
+              builder: (context, snap) => Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: snap.connectionState != ConnectionState.done
+                    ? const Center(child: CircularProgressIndicator())
+                    : Text(snap.hasError ? 'Isi lengkap belum bisa dimuat. Coba lagi nanti.' : snap.data ?? '',
+                        style: appText(15, color: snap.hasError ? AppColors.error : AppColors.ink).copyWith(height: 22 / 15)),
+              ),
+            ),
+        ],
       );
 }
