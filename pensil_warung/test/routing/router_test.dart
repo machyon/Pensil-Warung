@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import '../support/feed.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 import 'package:pensil_warung/data/api_client.dart';
@@ -54,11 +55,13 @@ void main() {
         baseUrl: 'http://x', client: MockClient((_) async => http.Response('{"items":[]}', 200)));
     final products = ProductRepository(api);
     final catat = CatatViewModel(CatatRepository(api, products), products, TransactionRepository(api, products));
+    final feed = await testFeed();
     await tester.pumpWidget(MultiProvider(
       providers: [
         ChangeNotifierProvider.value(value: session),
         ChangeNotifierProvider.value(value: products),
         ChangeNotifierProvider.value(value: catat),
+        ChangeNotifierProvider.value(value: feed),
       ],
       child: MaterialApp.router(routerConfig: router),
     ));

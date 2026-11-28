@@ -17,6 +17,7 @@ import 'analitik_view.dart';
 import 'day_tile.dart';
 import 'histori_view_model.dart';
 import 'month_picker_sheet.dart';
+import '../notifications/notification_feed.dart';
 
 const _firstDays = 7;
 
@@ -47,7 +48,7 @@ class _BodyState extends State<_Body> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          AppHeader(title: _tab == 1 && vm.summary != null && AnalitikView.isFull(vm) ? 'Laporan Analitik' : 'Histori'),
+          AppHeader(title: _tab == 1 && vm.summary != null && AnalitikView.isFull(vm) ? 'Laporan Analitik' : 'Histori', hasUnread: context.select<NotificationFeed, bool>((f) => f.hasUnread), onBell: () => context.push('/notifikasi')),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
             child: SegmentedTabs(labels: const ['Histori', 'Analitik'], selected: _tab, onChanged: (i) => setState(() => _tab = i)),
