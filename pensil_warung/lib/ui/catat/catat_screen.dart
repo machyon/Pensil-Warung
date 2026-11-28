@@ -1,3 +1,6 @@
+import 'dart:typed_data';
+
+import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 
@@ -6,10 +9,14 @@ import '../../data/session.dart';
 import '../core/format.dart';
 import '../core/theme.dart';
 import '../core/widgets/app_header.dart';
+import '../core/widgets/app_card.dart';
 import '../core/widgets/buttons.dart';
 import 'catat_confirm.dart';
 import 'catat_editor.dart';
 import 'catat_results.dart';
+import '../photos/photo_flow.dart';
+import '../../catat/parser.dart';
+import '../../catat/result.dart';
 import 'catat_view_model.dart';
 import 'saved_card.dart';
 
@@ -104,14 +111,39 @@ class _CatatScreenState extends State<CatatScreen> {
                   controller: vm.controller,
                   errorLines: vm.errorLines,
                   scroll: vm.scroll,
+                  enabled: vm.boxEnabled,
+                  hint: vm.noProducts
+                      ? vm.commandMode ? 'buat produk nama harga 2000 stok 30' : 'Tambah barang dulu supaya bisa dicatat'
+                      : 'Tulis jualan di sini',
                 ),
+                if (vm.noProducts && !vm.commandMode) ...[
+                  const SizedBox(height: 40),
+                  _NoProducts(onAdd: () => context.push('/produk/tambah'), onCommand: vm.enableCommandMode),
+                ],
+                if (vm.noProducts && vm.commandMode) ...[
+                  const SizedBox(height: 40),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: Text.rich(TextSpan(style: appText(14, color: AppColors.label), children: [
+                      const TextSpan(text: 'Satu barang per baris: '),
+                      TextSpan(text: 'buat produk nama harga 2000 stok 30', style: monoText(13)),
+                    ])),
+                  ),
+                ],
                 if (vm.saved != null) ...[
                   const SizedBox(height: 40),
                   SavedCardView(saved: vm.saved!),
                 ],
                 if (vm.lint.lines.isNotEmpty) ...[
                   const SizedBox(height: 40),
-                  ResultsCard(result: vm.lint, onFix: vm.applyFix, onGoToLine: _goToLine),
+                  ResultsCard(
+                    result: vm.lint,
+                    onFix: vm.applyFix,
+                    onGoToLine: _goToLine,
+                    trailing: (l) => l.kind == LineKind.createProduct && l.status != LineStatus.error
+                        ? _PhotoButton(name: l.productName!, bytes: vm.photos[l.productName!.toLowerCase()], vm: vm)
+                        : null,
+                  ),
                 ],
               ],
             ),
@@ -155,6 +187,51 @@ class _Bar extends StatelessWidget {
           SizedBox(width: 140, child: PrimaryButton(label: 'Simpan', onPressed: vm.lint.canSave ? onSave : null, busy: vm.running)),
         ],
       ),
+    );
+  }
+}
+
+class _NoProducts extends StatelessWidget {
+  const _NoProducts({required this.onAdd, required this.onCommand});
+
+  final VoidCallback onAdd, onCommand;
+
+  @override
+  Widget build(BuildContext context) {
+    return AppCard(
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Text('Belum ada barang', style: appText(20, weight: FontWeight.w800)),
+        const SizedBox(height: 6),
+        Text('Catat hanya mengenali barang yang sudah terdaftar. Cukup isi nama, harga, dan stok. Satu barang sudah bisa.',
+            style: appText(15, color: AppColors.muted)),
+        const SizedBox(height: 16),
+        PrimaryButton(label: 'Tambah barang', onPressed: onAdd),
+        const SizedBox(height: 10),
+        SecondaryButton(label: 'Ketik perintah', onPressed: onCommand),
+      ]),
+    );
+  }
+}
+
+/// Camera button on a new-product row; shows the picked photo once there is one.
+class _PhotoButton extends StatelessWidget {
+  const _PhotoButton({required this.name, required this.bytes, required this.vm});
+
+  final String name;
+  final Uint8List? bytes;
+  final CatatViewModel vm;
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      tooltip: 'Foto $name',
+      onPressed: () async {
+        final pick = await pickProductPhoto(context, name: name, hasPhoto: bytes != null);
+        if (pick != null) vm.setPhoto(name, pick.remove ? null : pick.bytes);
+      },
+      icon: bytes == null
+          ? const Icon(Icons.photo_camera_outlined)
+          : ClipRRect(borderRadius: BorderRadius.circular(8), child: Image.memory(bytes!, width: 32, height: 32, fit: BoxFit.cover)),
     );
   }
 }
