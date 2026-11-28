@@ -8,6 +8,7 @@ import '../core/theme.dart';
 import '../core/widgets/app_header.dart';
 import '../core/widgets/buttons.dart';
 import 'catat_editor.dart';
+import 'catat_results.dart';
 import 'catat_view_model.dart';
 
 class CatatScreen extends StatefulWidget {
@@ -25,6 +26,14 @@ class _CatatScreenState extends State<CatatScreen> {
     super.initState();
     final products = context.read<ProductRepository>();
     if (!products.loaded) products.load().catchError((_) {});
+  }
+
+  void _goToLine(int n) {
+    final vm = context.read<CatatViewModel>();
+    final e = _editor.currentState;
+    if (e == null || !vm.scroll.hasClients) return;
+    vm.scroll.animateTo(e.offsetOfLine(n).clamp(0, vm.scroll.position.maxScrollExtent),
+        duration: const Duration(milliseconds: 250), curve: Curves.easeOut);
   }
 
   @override
@@ -46,10 +55,14 @@ class _CatatScreenState extends State<CatatScreen> {
                   errorLines: vm.errorLines,
                   scroll: vm.scroll,
                 ),
+                if (vm.lint.lines.isNotEmpty) ...[
+                  const SizedBox(height: 40),
+                  ResultsCard(result: vm.lint, onFix: vm.applyFix, onGoToLine: _goToLine),
+                ],
               ],
             ),
           ),
-          _Bar(vm: vm),
+          _Bar(vm: vm, onSave: () {}),
         ],
       ),
     );
@@ -57,12 +70,16 @@ class _CatatScreenState extends State<CatatScreen> {
 }
 
 class _Bar extends StatelessWidget {
-  const _Bar({required this.vm});
+  const _Bar({required this.vm, required this.onSave});
 
   final CatatViewModel vm;
+  final VoidCallback onSave;
 
   @override
   Widget build(BuildContext context) {
+    final newOnly = vm.lint.saleCount == 0 && vm.summary.newProducts.isNotEmpty;
+    final label = newOnly ? 'Barang baru' : vm.hasText ? 'Total jualan' : 'Total';
+    final value = newOnly ? '${vm.summary.newProducts.length}' : rupiah(vm.lint.total);
     return Container(
       padding: const EdgeInsets.fromLTRB(24, 14, 16, 14),
       decoration: const BoxDecoration(color: AppColors.surface, border: Border(top: BorderSide(color: AppColors.border))),
@@ -72,12 +89,16 @@ class _Bar extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(vm.hasText ? 'Total jualan' : 'Total', style: appText(13, weight: FontWeight.w600, color: AppColors.muted)),
-                Text(rupiah(vm.lint.total), style: appText(26, weight: FontWeight.w800, letterSpacing: -0.5)),
+                if (vm.lint.errors > 0)
+                  Text('Betulkan ${vm.lint.errors} baris dulu', style: appText(16, weight: FontWeight.w800, color: AppColors.error))
+                else ...[
+                  Text(label, style: appText(13, weight: FontWeight.w600, color: AppColors.muted)),
+                  Text(value, style: appText(26, weight: FontWeight.w800, letterSpacing: -0.5)),
+                ],
               ],
             ),
           ),
-          SizedBox(width: 140, child: PrimaryButton(label: 'Simpan', onPressed: null, busy: vm.running)),
+          SizedBox(width: 140, child: PrimaryButton(label: 'Simpan', onPressed: vm.lint.canSave ? onSave : null, busy: vm.running)),
         ],
       ),
     );
