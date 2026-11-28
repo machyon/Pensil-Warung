@@ -40,6 +40,12 @@ String wibDate(DateTime t) {
   return '${dayNames[w.weekday - 1]}, ${w.day} ${monthNames[w.month - 1]} ${w.year}';
 }
 
+/// `Selasa, 17 Nov 2026`
+String wibDateShort(DateTime t) {
+  final w = wib(t);
+  return '${dayNames[w.weekday - 1]}, ${w.day} ${monthNames[w.month - 1].substring(0, 3)} ${w.year}';
+}
+
 /// `2026-11-26`, the WIB date sent as `date=`.
 String wibIsoDate(DateTime t) {
   final w = wib(t);

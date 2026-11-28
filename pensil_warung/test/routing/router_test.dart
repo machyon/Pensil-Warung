@@ -2,6 +2,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 import 'package:pensil_warung/data/api_client.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:pensil_warung/data/repositories/catat_repository.dart';
+import 'package:pensil_warung/data/repositories/product_repository.dart';
+import 'package:pensil_warung/ui/catat/catat_view_model.dart';
 import 'package:pensil_warung/data/repositories/auth_repository.dart';
 import 'package:pensil_warung/data/session.dart';
 import 'package:pensil_warung/domain/user.dart';
@@ -44,7 +49,18 @@ void main() {
   testWidgets('user shell shows the nav; no session shows Landing', (tester) async {
     final session = Session()..setUser(_user('user'));
     final router = buildRouter(session, initialLocation: '/catat');
-    await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+    final api = ApiClient(
+        baseUrl: 'http://x', client: MockClient((_) async => http.Response('{"items":[]}', 200)));
+    final products = ProductRepository(api);
+    final catat = CatatViewModel(CatatRepository(api, products), products);
+    await tester.pumpWidget(MultiProvider(
+      providers: [
+        ChangeNotifierProvider.value(value: session),
+        ChangeNotifierProvider.value(value: products),
+        ChangeNotifierProvider.value(value: catat),
+      ],
+      child: MaterialApp.router(routerConfig: router),
+    ));
     await tester.pumpAndSettle();
     expect(find.byType(MainNav), findsOneWidget);
 
